@@ -1,0 +1,11 @@
+node_modules/
+dist/
+.npm-cache/
+
+client/dist/
+server/dist/
+shared/dist/
+
+.DS_Store
+.env
+.env.local
