@@ -341,7 +341,7 @@ function platformReadiness(checks: FeedCheck[], platform: CheckPlatform): Platfo
   const score = scoreChecks(platformChecks);
   const issues = platformChecks
     .filter((check) => check.status !== "pass")
-    .map((check) => `${check.label}: ${check.message}`);
+    .map((check) => `🔴 ${check.message}`);
 
   return {
     score,

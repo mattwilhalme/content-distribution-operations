@@ -239,11 +239,6 @@ button:disabled {
   gap: 10px;
 }
 
-.check-list.compact {
-  max-height: 420px;
-  overflow: auto;
-}
-
 .check {
   padding: 12px;
   border-left: 4px solid #d6a434;
@@ -275,6 +270,12 @@ button:disabled {
 .check p {
   margin: 8px 0;
   color: #3f4d53;
+}
+
+.platforms .note {
+  margin-bottom: 12px;
+  font-size: 0.9rem;
+  line-height: 1.45;
 }
 
 .table-section {

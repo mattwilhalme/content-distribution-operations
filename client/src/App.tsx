@@ -90,14 +90,14 @@ export default function App() {
           <section className="platforms">
             <Platform title="SmartNews" issues={result.platforms.smartnews.issues} />
             <Platform title="NewsBreak" issues={result.platforms.newsbreak.issues} />
-            <Platform title="Google News" issues={result.platforms.googleNews.issues} />
+            <Platform title="Google News" issues={result.platforms.googleNews.issues} note="Google News is scored against shared feed health plus Google-specific freshness and canonical-link checks. SmartNews-only requirements like snf:logo, author, full content, and media:thumbnail do not lower this score." />
             <Platform title="Apple News" issues={result.platforms.appleNews.issues} note="Apple News is treated as conversion readiness for a later API/ANF integration." />
           </section>
 
           <section className="checks-grid">
             <CheckGroup title="Critical" checks={grouped.critical} />
             <CheckGroup title="Warnings" checks={[...grouped.failed, ...grouped.warnings]} />
-            <CheckGroup title="Passed" checks={grouped.passed} compact />
+            <CheckGroup title="Passed" checks={grouped.passed} />
           </section>
 
           <section className="table-section">
@@ -168,20 +168,20 @@ function Platform({ title, issues, note }: { title: string; issues: string[]; no
   );
 }
 
-function CheckGroup({ title, checks, compact = false }: { title: string; checks: FeedCheck[]; compact?: boolean }) {
+function CheckGroup({ title, checks }: { title: string; checks: FeedCheck[] }) {
   return (
     <section className="panel check-group">
       <h2>{title}</h2>
       {checks.length ? (
-        <div className={compact ? "check-list compact" : "check-list"}>
+        <div className="check-list">
           {checks.map((check) => (
             <article className={`check ${check.status}`} key={check.id}>
               <div>
                 <strong>{check.label}</strong>
                 <span>{platformLabel(check.platform)} · {check.severity}</span>
               </div>
-              {!compact && <p>{check.message}</p>}
-              {!compact && <small>{check.recommendation}</small>}
+              <p>{checkMessage(check)}</p>
+              <small>{check.recommendation}</small>
             </article>
           ))}
         </div>
@@ -190,6 +190,15 @@ function CheckGroup({ title, checks, compact = false }: { title: string; checks:
       )}
     </section>
   );
+}
+
+function checkMessage(check: FeedCheck) {
+  return `${checkMarker(check.status)} ${check.message}`;
+}
+
+function checkMarker(status: FeedCheck["status"]) {
+  if (status === "pass") return "🟢";
+  return status === "fail" ? "🔴" : "🟡";
 }
 
 function formatStatus(status: string) {
