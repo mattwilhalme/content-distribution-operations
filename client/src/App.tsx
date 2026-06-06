@@ -543,13 +543,18 @@ function SmartNewsStory({ item }: { item: ScanResponse["sampleItems"][number] })
   const hasSmartNewsThumbnail = item.hasThumbnail && Boolean(item.thumbnailUrl);
 
   return (
-    <article className={`smartnews-story ${hasSmartNewsThumbnail ? "with-thumb" : ""}`}>
+    <article className="smartnews-story">
       <div>
         <a href={item.link} target="_blank" rel="noreferrer">{headline}</a>
         <small>{source} · {formatDate(analysis?.datePublished || item.publishedAt) || "Missing date"}</small>
       </div>
-      {hasSmartNewsThumbnail && (
+      {hasSmartNewsThumbnail ? (
         <img src={item.thumbnailUrl} alt="" />
+      ) : (
+        <div className="smartnews-missing-thumb" aria-label="SmartNews thumbnail missing">
+          <span>thumbnail</span>
+          <span>missing</span>
+        </div>
       )}
     </article>
   );
