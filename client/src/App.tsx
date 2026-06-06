@@ -1,8 +1,16 @@
-import { FormEvent, useMemo, useState } from "react";
-import type { CheckPlatform, FeedCheck, ScanResponse } from "@content-distribution-operations/shared";
+import { FormEvent, useEffect, useMemo, useState } from "react";
+import type {
+  CheckPlatform,
+  FeedCheck,
+  PublisherSummary,
+  ScanResponse,
+  ScanRunSummary
+} from "@content-distribution-operations/shared";
 
 const starterFeed = "https://www.npr.org/rss/rss.php?id=1001";
+const publisherStatuses = ["prospect", "reviewing", "ready", "blocked", "approved"];
 type ResultChannel = "overall" | "smartnews" | "newsbreak" | "google_news" | "apple_news";
+type ViewMode = "dashboard" | "scanner";
 
 const sharedPlatforms: CheckPlatform[] = ["general", "media", "content"];
 
@@ -27,27 +35,163 @@ export default function App() {
   const [result, setResult] = useState<ScanResponse | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [history, setHistory] = useState<ScanRunSummary[]>([]);
+  const [publishers, setPublishers] = useState<PublisherSummary[]>([]);
+  const [historyError, setHistoryError] = useState("");
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [publisherLoading, setPublisherLoading] = useState(false);
+  const [selectedScanId, setSelectedScanId] = useState("");
+  const [selectedPublisherId, setSelectedPublisherId] = useState("");
   const [selectedChannel, setSelectedChannel] = useState<ResultChannel>("smartnews");
+  const [viewMode, setViewMode] = useState<ViewMode>("dashboard");
+
+  useEffect(() => {
+    void refreshOperations();
+  }, []);
+
+  const selectedPublisher = useMemo(
+    () => publishers.find((publisher) => publisher.id === selectedPublisherId),
+    [publishers, selectedPublisherId]
+  );
+
+  const visibleHistory = useMemo(() => {
+    if (!selectedPublisherId) return history;
+    return history.filter((scan) => scan.publisherId === selectedPublisherId);
+  }, [history, selectedPublisherId]);
+
+  const metrics = useMemo(() => {
+    const scored = publishers.filter((publisher) => publisher.latestFetchedAt);
+    const averageScore = scored.length
+      ? Math.round(scored.reduce((total, publisher) => total + publisher.latestOverallScore, 0) / scored.length)
+      : 0;
+
+    return {
+      publishers: publishers.length,
+      scans: history.length,
+      blocked: publishers.filter((publisher) => publisher.latestCriticalCount > 0 || publisher.status === "blocked").length,
+      averageScore
+    };
+  }, [history.length, publishers]);
+
+  async function refreshOperations() {
+    await Promise.all([loadPublishers(), loadHistory()]);
+  }
+
+  async function loadPublishers() {
+    setPublisherLoading(true);
+
+    try {
+      const response = await fetch("/api/publishers");
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error ?? "Publishers failed.");
+      setPublishers(data.publishers ?? []);
+    } catch (publisherError) {
+      setHistoryError(publisherError instanceof Error ? publisherError.message : "Publishers failed.");
+    } finally {
+      setPublisherLoading(false);
+    }
+  }
+
+  async function loadHistory() {
+    setHistoryLoading(true);
+    setHistoryError("");
+
+    try {
+      const response = await fetch("/api/scans");
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error ?? "History failed.");
+      setHistory(data.scans ?? []);
+    } catch (historyLoadError) {
+      setHistoryError(historyLoadError instanceof Error ? historyLoadError.message : "History failed.");
+    } finally {
+      setHistoryLoading(false);
+    }
+  }
 
   async function scanFeed(event: FormEvent) {
     event.preventDefault();
+    await runScan(url);
+  }
+
+  async function runScan(feedUrl: string) {
     setLoading(true);
     setError("");
     setResult(null);
+    setViewMode("scanner");
 
     try {
       const response = await fetch("/api/scan", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url })
+        body: JSON.stringify({ url: feedUrl })
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error ?? "Scan failed.");
       setResult(data);
+      setSelectedScanId(data.scanRunId ?? "");
+      setSelectedPublisherId(data.publisherId ?? selectedPublisherId);
+      await refreshOperations();
     } catch (scanError) {
       setError(scanError instanceof Error ? scanError.message : "Scan failed.");
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function loadSavedScan(scanRunId: string) {
+    setLoading(true);
+    setError("");
+    setSelectedScanId(scanRunId);
+    setViewMode("scanner");
+
+    try {
+      const response = await fetch(`/api/scans/${scanRunId}`);
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error ?? "Saved scan failed.");
+      setResult(data);
+      setSelectedPublisherId(data.publisherId ?? selectedPublisherId);
+    } catch (savedScanError) {
+      setError(savedScanError instanceof Error ? savedScanError.message : "Saved scan failed.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function rescan(scan: ScanRunSummary | PublisherSummary) {
+    const scanId = "latestScanId" in scan ? scan.latestScanId : scan.id;
+    if (!scanId) return;
+
+    setLoading(true);
+    setError("");
+    setViewMode("scanner");
+
+    try {
+      const response = await fetch(`/api/scans/${scanId}/rescan`, { method: "POST" });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error ?? "Rescan failed.");
+      setResult(data);
+      setSelectedScanId(data.scanRunId ?? "");
+      setSelectedPublisherId(data.publisherId ?? selectedPublisherId);
+      await refreshOperations();
+    } catch (rescanError) {
+      setError(rescanError instanceof Error ? rescanError.message : "Rescan failed.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function updatePublisherField(publisherId: string, values: { status?: string; notes?: string; name?: string }) {
+    try {
+      const response = await fetch(`/api/publishers/${publisherId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(values)
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error ?? "Publisher update failed.");
+      await loadPublishers();
+    } catch (publisherError) {
+      setError(publisherError instanceof Error ? publisherError.message : "Publisher update failed.");
     }
   }
 
@@ -73,30 +217,128 @@ export default function App() {
       <section className="hero">
         <div>
           <p className="eyebrow">Content Distribution Operations</p>
-          <h1>Feed readiness scanner</h1>
+          <h1>Operations console</h1>
           <p className="intro">
-            Audit publisher RSS, Atom, and MRSS feeds for operational readiness across key distribution platforms.
+            Manage publisher feed readiness, scan history, review status, and distribution blockers before public-facing workflows.
           </p>
         </div>
         <form className="scan-form" onSubmit={scanFeed}>
           <label htmlFor="feed-url">Feed URL</label>
           <div className="input-row">
             <input id="feed-url" value={url} onChange={(event) => setUrl(event.target.value)} placeholder="https://example.com/feed.xml" />
-            <button disabled={loading}>{loading ? "Scanning..." : "Scan"}</button>
+            <button disabled={loading}>{loading ? "Working..." : "Scan"}</button>
           </div>
         </form>
       </section>
 
+      <section className="tabs">
+        <button className={viewMode === "dashboard" ? "active" : ""} type="button" onClick={() => setViewMode("dashboard")}>Dashboard</button>
+        <button className={viewMode === "scanner" ? "active" : ""} type="button" onClick={() => setViewMode("scanner")}>Scanner</button>
+      </section>
+
       {error && <div className="error">{error}</div>}
 
-      {!result && !error && (
+      {viewMode === "dashboard" && (
+        <>
+          <section className="metric-grid">
+            <MetricCard label="Publishers" value={metrics.publishers} />
+            <MetricCard label="Saved scans" value={metrics.scans} />
+            <MetricCard label="Avg score" value={metrics.averageScore} />
+            <MetricCard label="Needs attention" value={metrics.blocked} />
+          </section>
+
+          <section className="publisher-section">
+            <div className="section-head">
+              <div>
+                <p className="eyebrow">Publisher operations</p>
+                <h2>Publisher dashboard</h2>
+              </div>
+              <button className="secondary-button" type="button" onClick={refreshOperations} disabled={publisherLoading || historyLoading}>
+                {publisherLoading || historyLoading ? "Loading" : "Refresh"}
+              </button>
+            </div>
+            <div className="publisher-list">
+              {publishers.map((publisher) => (
+                <article className={`publisher-row ${selectedPublisherId === publisher.id ? "selected" : ""}`} key={publisher.id}>
+                  <button type="button" className="publisher-main" onClick={() => setSelectedPublisherId(selectedPublisherId === publisher.id ? "" : publisher.id)}>
+                    <span>
+                      <strong>{publisher.name || publisher.domain}</strong>
+                      <small>{publisher.latestFeedTitle || publisher.latestFeedUrl || "No scans yet"}</small>
+                    </span>
+                    <span className="history-meta">
+                      <strong>{publisher.latestOverallScore || "-"}</strong>
+                      <small>{publisher.scanCount} scans</small>
+                    </span>
+                    <span className="history-meta">
+                      <strong>{publisher.latestCriticalCount}</strong>
+                      <small>critical</small>
+                    </span>
+                    <span className="history-time">{publisher.latestFetchedAt ? formatDate(publisher.latestFetchedAt) : "No runs"}</span>
+                  </button>
+                  <div className="publisher-controls">
+                    <select value={publisher.status} onChange={(event) => void updatePublisherField(publisher.id, { status: event.target.value })}>
+                      {publisherStatuses.map((status) => <option key={status} value={status}>{formatStatus(status)}</option>)}
+                    </select>
+                    <input
+                      value={publisher.notes}
+                      onChange={(event) => setPublishers((current) => current.map((item) => item.id === publisher.id ? { ...item, notes: event.target.value } : item))}
+                      onBlur={(event) => void updatePublisherField(publisher.id, { notes: event.target.value })}
+                      placeholder="Internal notes"
+                    />
+                    <button className="secondary-button" type="button" disabled={!publisher.latestScanId || loading} onClick={() => void rescan(publisher)}>Rescan</button>
+                  </div>
+                </article>
+              ))}
+              {!publishers.length && !publisherLoading && <p className="clean">No publishers yet. Run a scan to create the first publisher record.</p>}
+            </div>
+          </section>
+        </>
+      )}
+
+      <section className="history-section">
+        <div className="section-head">
+          <div>
+            <p className="eyebrow">Scan history</p>
+            <h2>{selectedPublisher ? `${selectedPublisher.domain} runs` : "Recent runs"}</h2>
+          </div>
+          <button className="secondary-button" type="button" onClick={loadHistory} disabled={historyLoading}>
+            {historyLoading ? "Loading" : "Refresh"}
+          </button>
+        </div>
+        {historyError && <div className="error compact">{historyError}</div>}
+        <div className="history-list">
+          {visibleHistory.map((scan) => (
+            <div className={`history-row-shell ${selectedScanId === scan.id ? "selected" : ""}`} key={scan.id}>
+              <button className="history-row" onClick={() => void loadSavedScan(scan.id)} type="button">
+                <span>
+                  <strong>{scan.feedTitle || scan.domain || "Untitled feed"}</strong>
+                  <small>{scan.inputUrl}</small>
+                </span>
+                <span className="history-meta">
+                  <strong>{scan.overallScore}</strong>
+                  <small>{scan.itemCount} items</small>
+                </span>
+                <span className="history-meta">
+                  <strong>{scan.criticalCount}</strong>
+                  <small>critical</small>
+                </span>
+                <span className="history-time">{formatDate(scan.fetchedAt)}</span>
+              </button>
+              <button className="secondary-button" type="button" disabled={loading} onClick={() => void rescan(scan)}>Rescan</button>
+            </div>
+          ))}
+          {!visibleHistory.length && !historyLoading && <p className="clean">No saved scans yet.</p>}
+        </div>
+      </section>
+
+      {viewMode === "scanner" && !result && !error && (
         <section className="empty-state">
-          <h2>Ready for the first audit</h2>
-          <p>Enter a real publisher feed URL to see scoring, issue groups, platform readiness, and sample item details.</p>
+          <h2>Ready for the next audit</h2>
+          <p>Enter a publisher feed URL, open a saved run, or rescan from history.</p>
         </section>
       )}
 
-      {result && (
+      {viewMode === "scanner" && result && (
         <>
           <section className="overview">
             <ScoreCard title="Overall" score={result.overallScore} status={result.feedType.toUpperCase()} selected={selectedChannel === "overall"} onSelect={() => setSelectedChannel("overall")} />
@@ -112,6 +354,7 @@ export default function App() {
             <span>{result.summary.critical} critical</span>
             <span>{result.summary.warnings} warnings</span>
             <span>Scanned {new Date(result.fetchedAt).toLocaleString()}</span>
+            {result.scanRunId && <span>Run {result.scanRunId.slice(0, 8)}</span>}
           </section>
 
           <section className="channel-summary panel">
@@ -134,7 +377,7 @@ export default function App() {
           </section>
 
           <section className="table-section">
-            <h2>Sample item analysis</h2>
+            <h2>Sample article analysis</h2>
             <div className="table-wrap">
               <table>
                 <thead>
@@ -143,7 +386,7 @@ export default function App() {
                     <th>Title</th>
                     <th>Date</th>
                     <th>Image</th>
-                    <th>Body</th>
+                    <th>Article page</th>
                     <th>Issues</th>
                   </tr>
                 </thead>
@@ -156,7 +399,7 @@ export default function App() {
                       </td>
                       <td>{item.publishedAt || "Missing"}</td>
                       <td>{item.hasImage ? "Yes" : "No"}</td>
-                      <td>{item.bodyLength} chars {item.likelyFullText ? "Full" : "Short"}</td>
+                      <td>{articlePageSummary(item)}</td>
                       <td>{item.issues.length ? item.issues.join(", ") : "None"}</td>
                     </tr>
                   ))}
@@ -167,6 +410,15 @@ export default function App() {
         </>
       )}
     </main>
+  );
+}
+
+function MetricCard({ label, value }: { label: string; value: number }) {
+  return (
+    <section className="metric-card">
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </section>
   );
 }
 
@@ -208,15 +460,37 @@ function CheckGroup({ title, checks }: { title: string; checks: FeedCheck[] }) {
   );
 }
 
+function articlePageSummary(item: ScanResponse["sampleItems"][number]) {
+  const analysis = item.articleAnalysis;
+  if (!analysis) return "Not checked";
+  if (!analysis.reachable) return "Unreachable";
+  const parts = [
+    analysis.hasArticleStructuredData ? "Schema" : "No schema",
+    analysis.canonicalUrl ? "Canonical" : "No canonical",
+    analysis.author ? "Author" : "No author"
+  ];
+  return parts.join(" / ");
+}
+
 function checkMessage(check: FeedCheck) {
   return `${checkMarker(check.status)} ${check.message}`;
 }
 
 function checkMarker(status: FeedCheck["status"]) {
-  if (status === "pass") return "🟢";
-  return status === "fail" ? "🔴" : "🟡";
+  if (status === "pass") return "OK";
+  return status === "fail" ? "Fail" : "Warn";
 }
 
 function formatStatus(status: string) {
   return status.replace("_", " ");
+}
+
+function formatDate(value: string) {
+  if (!value) return "";
+  return new Date(value).toLocaleString([], {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit"
+  });
 }

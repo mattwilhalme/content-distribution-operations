@@ -4,9 +4,14 @@ import cors from "cors";
 import express from "express";
 import { XMLParser } from "fast-xml-parser";
 
-import { saveScanRun } from "./db/scanRuns.js";
+import { saveArticleChecks } from "./db/articleChecks.js";
+import { saveCrawlAttempt } from "./db/crawlAttempts.js";
+import { saveFeedCandidate } from "./db/feedCandidates.js";
+import { listPublishers, updatePublisher, upsertPublisher } from "./db/publishers.js";
+import { getScanRun, listScanRuns, saveScanRun } from "./db/scanRuns.js";
 
 import type {
+  ArticleAnalysis,
   CheckPlatform,
   CheckSeverity,
   CheckStatus,
@@ -65,6 +70,11 @@ interface ArticlePageAnalysis {
   hasMaxImagePreviewLarge: boolean;
 }
 
+interface PersistedScan {
+  scan: ScanResponse;
+  statusCode: number;
+}
+
 const parser = new XMLParser({
   ignoreAttributes: false,
   attributeNamePrefix: "@_",
@@ -79,6 +89,56 @@ app.get("/api/health", (_req, res) => {
   res.json({ ok: true });
 });
 
+app.get("/api/publishers", async (_req, res) => {
+  try {
+    const publishers = await listPublishers();
+    res.json({ publishers });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unable to load publishers.";
+    res.status(500).json({ error: message });
+  }
+});
+
+app.patch("/api/publishers/:id", async (req, res) => {
+  try {
+    await updatePublisher(req.params.id, {
+      name: typeof req.body?.name === "string" ? req.body.name : undefined,
+      status: typeof req.body?.status === "string" ? req.body.status : undefined,
+      notes: typeof req.body?.notes === "string" ? req.body.notes : undefined
+    });
+    res.json({ ok: true });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unable to update publisher.";
+    res.status(500).json({ error: message });
+  }
+});
+
+app.get("/api/scans", async (_req, res) => {
+  try {
+    const scans = await listScanRuns();
+    res.json({ scans });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unable to load scan history.";
+    res.status(500).json({ error: message });
+  }
+});
+
+app.get("/api/scans/:id", async (req, res) => {
+  try {
+    const scan = await getScanRun(req.params.id);
+
+    if (!scan) {
+      res.status(404).json({ error: "Scan not found." });
+      return;
+    }
+
+    res.json(scan);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unable to load scan.";
+    res.status(500).json({ error: message });
+  }
+});
+
 app.post("/api/scan", async (req, res) => {
   const url = String(req.body?.url ?? "").trim();
 
@@ -87,15 +147,45 @@ app.post("/api/scan", async (req, res) => {
     return;
   }
 
-  let parsedUrl: URL;
-  try {
-    parsedUrl = new URL(url);
-  } catch {
+  if (!parseHttpUrl(url)) {
     res.status(400).json({ error: "Enter a valid feed URL." });
     return;
   }
 
   try {
+    const { scan, statusCode } = await runAndPersistScan(url);
+    res.status(statusCode).json(scan);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unable to fetch feed.";
+    res.status(502).json({ error: message });
+  }
+});
+
+app.post("/api/scans/:id/rescan", async (req, res) => {
+  try {
+    const savedScan = await getScanRun(req.params.id);
+
+    if (!savedScan) {
+      res.status(404).json({ error: "Scan not found." });
+      return;
+    }
+
+    const { scan, statusCode } = await runAndPersistScan(savedScan.url);
+    res.status(statusCode).json(scan);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unable to rescan feed.";
+    res.status(502).json({ error: message });
+  }
+});
+
+async function runAndPersistScan(url: string): Promise<PersistedScan> {
+  const parsedUrl = new URL(url);
+  const homepageUrl = `${parsedUrl.protocol}//${parsedUrl.hostname}`;
+  let publisherId: string | undefined;
+
+  try {
+    publisherId = await upsertPublisher(parsedUrl.hostname, homepageUrl);
+
     const response = await fetch(parsedUrl, {
       headers: {
         "User-Agent": "ContentDistributionOperations/0.1 feed readiness scanner"
@@ -105,19 +195,48 @@ app.post("/api/scan", async (req, res) => {
 
     const xml = await response.text();
     const scan = await scanFeed(url, response.ok, parsedUrl.protocol === "https:", xml, response.status);
+    const feedCandidateId = await saveFeedCandidate({
+      publisherId,
+      domain: parsedUrl.hostname,
+      feedUrl: response.url,
+      scan
+    });
     const scanRunId = await saveScanRun({
       scan,
       inputUrl: url,
       finalUrl: response.url,
-      domain: parsedUrl.hostname
+      domain: parsedUrl.hostname,
+      publisherId,
+      feedCandidateId
     });
 
-    res.status(response.ok ? 200 : 502).json({ ...scan, scanRunId });
+    await saveArticleChecks(scanRunId, publisherId, scan.sampleItems);
+    await saveCrawlAttempt({
+      publisherId,
+      domain: parsedUrl.hostname,
+      attemptedUrl: url,
+      finalUrl: response.url,
+      httpStatus: response.status,
+      contentType: response.headers.get("content-type"),
+      success: response.ok,
+      raw: { feedType: scan.feedType, itemCount: scan.summary.itemCount }
+    });
+
+    return {
+      scan: { ...scan, scanRunId, publisherId, feedCandidateId },
+      statusCode: response.ok ? 200 : 502
+    };
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Unable to fetch feed.";
-    res.status(502).json({ error: message });
+    await saveCrawlAttempt({
+      publisherId,
+      domain: parsedUrl.hostname,
+      attemptedUrl: url,
+      success: false,
+      error: error instanceof Error ? error.message : "Unknown crawl error"
+    });
+    throw error;
   }
-});
+}
 
 async function scanFeed(url: string, reachable: boolean, isHttps: boolean, xml: string, statusCode?: number): Promise<ScanResponse> {
   const fetchedAt = new Date().toISOString();
@@ -509,7 +628,25 @@ function toSampleItem(item: NormalizedItem, index: number): SampleItem {
     hasContentEncoded: item.hasContentEncoded,
     bodyLength: bodyLength(item.body),
     likelyFullText: likelyFullText(item.body),
-    issues
+    issues,
+    articleAnalysis: item.pageAnalysis ? toArticleAnalysis(item.pageAnalysis) : undefined
+  };
+}
+
+function toArticleAnalysis(analysis: ArticlePageAnalysis): ArticleAnalysis {
+  return {
+    reachable: analysis.reachable,
+    statusCode: analysis.statusCode,
+    hasArticleStructuredData: analysis.hasArticleStructuredData,
+    headline: analysis.headline,
+    imageUrls: analysis.imageUrls,
+    datePublished: analysis.datePublished,
+    dateModified: analysis.dateModified,
+    author: analysis.author,
+    publisher: analysis.publisher,
+    canonicalUrl: analysis.canonicalUrl,
+    hasLargeImageHint: analysis.hasLargeImageHint,
+    hasMaxImagePreviewLarge: analysis.hasMaxImagePreviewLarge
   };
 }
 
@@ -626,11 +763,16 @@ function hasUtmParameters(value: string): boolean {
 }
 
 function isHttpUrl(value: string): boolean {
+  return Boolean(parseHttpUrl(value));
+}
+
+function parseHttpUrl(value: string): URL | undefined {
   try {
     const url = new URL(value);
-    return url.protocol === "http:" || url.protocol === "https:";
+    if (url.protocol === "http:" || url.protocol === "https:") return url;
+    return undefined;
   } catch {
-    return false;
+    return undefined;
   }
 }
 

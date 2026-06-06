@@ -39,6 +39,22 @@ export interface SampleItem {
   bodyLength: number;
   likelyFullText: boolean;
   issues: string[];
+  articleAnalysis?: ArticleAnalysis;
+}
+
+export interface ArticleAnalysis {
+  reachable: boolean;
+  statusCode?: number;
+  hasArticleStructuredData: boolean;
+  headline: string;
+  imageUrls: string[];
+  datePublished: string;
+  dateModified: string;
+  author: string;
+  publisher: string;
+  canonicalUrl: string;
+  hasLargeImageHint: boolean;
+  hasMaxImagePreviewLarge: boolean;
 }
 
 export interface ScanSummary {
@@ -53,6 +69,8 @@ export interface ScanSummary {
 
 export interface ScanResponse {
   scanRunId?: string;
+  publisherId?: string;
+  feedCandidateId?: string;
   url: string;
   fetchedAt: string;
   feedType: "rss" | "atom" | "unknown";
@@ -66,4 +84,43 @@ export interface ScanResponse {
     appleNews: PlatformReadiness;
   };
   sampleItems: SampleItem[];
+}
+
+export interface ScanRunSummary {
+  id: string;
+  publisherId: string;
+  feedCandidateId: string;
+  inputUrl: string;
+  finalUrl: string;
+  domain: string;
+  feedType: ScanResponse["feedType"];
+  feedTitle: string;
+  itemCount: number;
+  overallScore: number;
+  smartnewsScore: number;
+  newsbreakScore: number;
+  googleNewsScore: number;
+  appleNewsScore: number;
+  criticalCount: number;
+  warningCount: number;
+  failedCount: number;
+  fetchedAt: string;
+}
+
+export interface PublisherSummary {
+  id: string;
+  name: string;
+  domain: string;
+  homepageUrl: string;
+  status: string;
+  notes: string;
+  latestScanId: string;
+  latestFeedUrl: string;
+  latestFeedTitle: string;
+  latestOverallScore: number;
+  latestCriticalCount: number;
+  latestWarningCount: number;
+  latestFailedCount: number;
+  latestFetchedAt: string;
+  scanCount: number;
 }
