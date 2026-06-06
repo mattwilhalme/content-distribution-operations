@@ -52,6 +52,7 @@ export interface ScanSummary {
 }
 
 export interface ScanResponse {
+  scanRunId?: string;
   url: string;
   fetchedAt: string;
   feedType: "rss" | "atom" | "unknown";

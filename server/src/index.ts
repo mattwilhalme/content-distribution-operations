@@ -1,6 +1,11 @@
+import "dotenv/config";
+
 import cors from "cors";
 import express from "express";
 import { XMLParser } from "fast-xml-parser";
+
+import { saveScanRun } from "./db/scanRuns.js";
+
 import type {
   CheckPlatform,
   CheckSeverity,
@@ -100,7 +105,14 @@ app.post("/api/scan", async (req, res) => {
 
     const xml = await response.text();
     const scan = await scanFeed(url, response.ok, parsedUrl.protocol === "https:", xml, response.status);
-    res.status(response.ok ? 200 : 502).json(scan);
+    const scanRunId = await saveScanRun({
+      scan,
+      inputUrl: url,
+      finalUrl: response.url,
+      domain: parsedUrl.hostname
+    });
+
+    res.status(response.ok ? 200 : 502).json({ ...scan, scanRunId });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to fetch feed.";
     res.status(502).json({ error: message });

@@ -11,14 +11,18 @@
   },
   "dependencies": {
     "@content-distribution-operations/shared": "0.1.0",
+    "@supabase/supabase-js": "^2.107.0",
     "cors": "^2.8.5",
+    "dotenv": "^17.4.2",
     "express": "^4.21.2",
-    "fast-xml-parser": "^4.5.1"
+    "fast-xml-parser": "^4.5.1",
+    "ws": "^8.21.0"
   },
   "devDependencies": {
     "@types/cors": "^2.8.17",
     "@types/express": "^5.0.0",
     "@types/node": "^22.10.5",
+    "@types/ws": "^8.18.1",
     "tsx": "^4.19.2"
   }
 }
