@@ -2,12 +2,32 @@ import { FormEvent, useMemo, useState } from "react";
 import type { CheckPlatform, FeedCheck, ScanResponse } from "@content-distribution-operations/shared";
 
 const starterFeed = "https://www.npr.org/rss/rss.php?id=1001";
+type ResultChannel = "overall" | "smartnews" | "newsbreak" | "google_news" | "apple_news";
+
+const sharedPlatforms: CheckPlatform[] = ["general", "media", "content"];
+
+const channelNotes: Record<ResultChannel, string> = {
+  overall: "All scan checks across feed health, content, media, and distribution readiness.",
+  smartnews: "SmartNews includes shared feed quality checks plus SmartFormat-specific requirements such as full content, author metadata, snf:logo, and media:thumbnail coverage.",
+  newsbreak: "NewsBreak includes shared feed quality checks plus full-body and image/media presence checks.",
+  google_news: "Google News readiness now emphasizes crawlable article pages, Article/NewsArticle structured data, canonical URLs, dates, authors, images, language, and freshness. Feed signals still help discovery, but Publisher Center-submitted RSS sections are no longer the core path.",
+  apple_news: "Apple News is treated as conversion readiness for a later API/ANF integration."
+};
+
+const channelLabels: Record<ResultChannel, string> = {
+  overall: "Overall",
+  smartnews: "SmartNews",
+  newsbreak: "NewsBreak",
+  google_news: "Google News",
+  apple_news: "Apple News"
+};
 
 export default function App() {
   const [url, setUrl] = useState(starterFeed);
   const [result, setResult] = useState<ScanResponse | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [selectedChannel, setSelectedChannel] = useState<ResultChannel>("smartnews");
 
   async function scanFeed(event: FormEvent) {
     event.preventDefault();
@@ -31,15 +51,22 @@ export default function App() {
     }
   }
 
-  const grouped = useMemo(() => {
+  const selectedChecks = useMemo(() => {
     const checks = result?.checks ?? [];
+    if (selectedChannel === "overall") return checks;
+
+    return checks.filter((check) => check.platform === selectedChannel || sharedPlatforms.includes(check.platform));
+  }, [result, selectedChannel]);
+
+  const grouped = useMemo(() => {
+    const checks = selectedChecks;
     return {
       critical: checks.filter((check) => check.status === "fail" && check.severity === "critical"),
       failed: checks.filter((check) => check.status === "fail" && check.severity !== "critical"),
       warnings: checks.filter((check) => check.status === "warn"),
       passed: checks.filter((check) => check.status === "pass")
     };
-  }, [result]);
+  }, [selectedChecks]);
 
   return (
     <main>
@@ -72,11 +99,11 @@ export default function App() {
       {result && (
         <>
           <section className="overview">
-            <ScoreCard title="Overall" score={result.overallScore} status={result.feedType.toUpperCase()} />
-            <ScoreCard title="SmartNews" score={result.platforms.smartnews.score} status={formatStatus(result.platforms.smartnews.status)} />
-            <ScoreCard title="NewsBreak" score={result.platforms.newsbreak.score} status={formatStatus(result.platforms.newsbreak.status)} />
-            <ScoreCard title="Google News" score={result.platforms.googleNews.score} status={formatStatus(result.platforms.googleNews.status)} />
-            <ScoreCard title="Apple News" score={result.platforms.appleNews.score} status={formatStatus(result.platforms.appleNews.status)} />
+            <ScoreCard title="Overall" score={result.overallScore} status={result.feedType.toUpperCase()} selected={selectedChannel === "overall"} onSelect={() => setSelectedChannel("overall")} />
+            <ScoreCard title="SmartNews" score={result.platforms.smartnews.score} status={formatStatus(result.platforms.smartnews.status)} selected={selectedChannel === "smartnews"} onSelect={() => setSelectedChannel("smartnews")} />
+            <ScoreCard title="NewsBreak" score={result.platforms.newsbreak.score} status={formatStatus(result.platforms.newsbreak.status)} selected={selectedChannel === "newsbreak"} onSelect={() => setSelectedChannel("newsbreak")} />
+            <ScoreCard title="Google News" score={result.platforms.googleNews.score} status={formatStatus(result.platforms.googleNews.status)} selected={selectedChannel === "google_news"} onSelect={() => setSelectedChannel("google_news")} />
+            <ScoreCard title="Apple News" score={result.platforms.appleNews.score} status={formatStatus(result.platforms.appleNews.status)} selected={selectedChannel === "apple_news"} onSelect={() => setSelectedChannel("apple_news")} />
           </section>
 
           <section className="summary-bar">
@@ -87,11 +114,17 @@ export default function App() {
             <span>Scanned {new Date(result.fetchedAt).toLocaleString()}</span>
           </section>
 
-          <section className="platforms">
-            <Platform title="SmartNews" issues={result.platforms.smartnews.issues} />
-            <Platform title="NewsBreak" issues={result.platforms.newsbreak.issues} />
-            <Platform title="Google News" issues={result.platforms.googleNews.issues} note="Google News readiness now emphasizes crawlable article pages, Article/NewsArticle structured data, canonical URLs, dates, authors, images, language, and freshness. Feed signals still help discovery, but Publisher Center-submitted RSS sections are no longer the core path." />
-            <Platform title="Apple News" issues={result.platforms.appleNews.issues} note="Apple News is treated as conversion readiness for a later API/ANF integration." />
+          <section className="channel-summary panel">
+            <div>
+              <p className="eyebrow">Selected channel</p>
+              <h2>{channelLabels[selectedChannel]} results</h2>
+              <p className="note">{channelNotes[selectedChannel]}</p>
+            </div>
+            <div className="channel-counts">
+              <span><strong>{grouped.critical.length}</strong> critical</span>
+              <span><strong>{grouped.failed.length + grouped.warnings.length}</strong> warnings</span>
+              <span><strong>{grouped.passed.length}</strong> passed</span>
+            </div>
           </section>
 
           <section className="checks-grid">
@@ -137,9 +170,9 @@ export default function App() {
   );
 }
 
-function ScoreCard({ title, score, status }: { title: string; score: number; status: string }) {
+function ScoreCard({ title, score, status, selected, onSelect }: { title: string; score: number; status: string; selected: boolean; onSelect: () => void }) {
   return (
-    <article className="score-card">
+    <button className={`score-card ${selected ? "selected" : ""}`} onClick={onSelect} type="button" aria-pressed={selected}>
       <div className="score-head">
         <h2>{title}</h2>
         <span>{status}</span>
@@ -148,23 +181,7 @@ function ScoreCard({ title, score, status }: { title: string; score: number; sta
       <div className="meter" aria-hidden="true">
         <span style={{ width: `${score}%` }} />
       </div>
-    </article>
-  );
-}
-
-function Platform({ title, issues, note }: { title: string; issues: string[]; note?: string }) {
-  return (
-    <article className="panel">
-      <h2>{title}</h2>
-      {note && <p className="note">{note}</p>}
-      {issues.length ? (
-        <ul>
-          {issues.slice(0, 5).map((issue) => <li key={issue}>{issue}</li>)}
-        </ul>
-      ) : (
-        <p className="clean">No readiness issues found.</p>
-      )}
-    </article>
+    </button>
   );
 }
 
