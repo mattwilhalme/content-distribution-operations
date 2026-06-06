@@ -195,7 +195,6 @@ function CheckGroup({ title, checks }: { title: string; checks: FeedCheck[] }) {
             <article className={`check ${check.status}`} key={check.id}>
               <div>
                 <strong>{check.label}</strong>
-                <span>{platformLabel(check.platform)} · {check.severity}</span>
               </div>
               <p>{checkMessage(check)}</p>
               <small>{check.recommendation}</small>
@@ -220,8 +219,4 @@ function checkMarker(status: FeedCheck["status"]) {
 
 function formatStatus(status: string) {
   return status.replace("_", " ");
-}
-
-function platformLabel(platform: CheckPlatform) {
-  return String(platform).replace("_", " ");
 }
