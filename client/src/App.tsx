@@ -11,6 +11,7 @@ const starterFeed = "https://www.npr.org/rss/rss.php?id=1001";
 const publisherStatuses = ["prospect", "reviewing", "ready", "blocked", "approved"];
 type ResultChannel = "overall" | "smartnews" | "newsbreak" | "google_news" | "apple_news";
 type ViewMode = "dashboard" | "scanner";
+type ArticlePreviewMode = "google_news" | "smartnews" | "diagnostic";
 
 const sharedPlatforms: CheckPlatform[] = ["general", "media", "content"];
 
@@ -45,10 +46,21 @@ export default function App() {
   const [selectedChannel, setSelectedChannel] = useState<ResultChannel>("smartnews");
   const [viewMode, setViewMode] = useState<ViewMode>("dashboard");
   const [showPassedChecks, setShowPassedChecks] = useState(false);
+  const [articlePreviewMode, setArticlePreviewMode] = useState<ArticlePreviewMode>("smartnews");
 
   useEffect(() => {
     void refreshOperations();
   }, []);
+
+  useEffect(() => {
+    if (selectedChannel === "google_news") {
+      setArticlePreviewMode("google_news");
+    } else if (selectedChannel === "smartnews") {
+      setArticlePreviewMode("smartnews");
+    } else {
+      setArticlePreviewMode("diagnostic");
+    }
+  }, [selectedChannel]);
 
   const selectedPublisher = useMemo(
     () => publishers.find((publisher) => publisher.id === selectedPublisherId),
@@ -383,12 +395,21 @@ export default function App() {
           </section>
 
           <section className="article-preview-section">
-            <h2>Sample article analysis</h2>
-            <div className="article-preview-grid">
-              {result.sampleItems.map((item) => (
-                <ArticlePreviewCard item={item} key={`${item.index}-${item.link}`} />
-              ))}
+            <div className="article-preview-head">
+              <div>
+                <p className="eyebrow">Sample article analysis</p>
+                <h2>{articlePreviewTitle(articlePreviewMode, result.summary.feedTitle)}</h2>
+              </div>
+              <div className="preview-toggle" aria-label="Article preview mode">
+                <button className={articlePreviewMode === "google_news" ? "active" : ""} type="button" onClick={() => setArticlePreviewMode("google_news")}>Google News Preview</button>
+                <button className={articlePreviewMode === "smartnews" ? "active" : ""} type="button" onClick={() => setArticlePreviewMode("smartnews")}>SmartNews Preview</button>
+                <button className={articlePreviewMode === "diagnostic" ? "active" : ""} type="button" onClick={() => setArticlePreviewMode("diagnostic")}>Diagnostic Table</button>
+              </div>
             </div>
+
+            {articlePreviewMode === "google_news" && <GoogleNewsPreview result={result} />}
+            {articlePreviewMode === "smartnews" && <SmartNewsPreview result={result} />}
+            {articlePreviewMode === "diagnostic" && <DiagnosticArticleTable items={result.sampleItems} />}
           </section>
         </>
       )}
@@ -462,7 +483,25 @@ function CheckGroup({
   );
 }
 
-function ArticlePreviewCard({ item }: { item: ScanResponse["sampleItems"][number] }) {
+function GoogleNewsPreview({ result }: { result: ScanResponse }) {
+  const [lead, ...related] = result.sampleItems;
+  if (!lead) return <p className="clean">No sample items available.</p>;
+
+  return (
+    <section className="google-preview-card" aria-label="Mock Google News preview">
+      <div className="mock-label">Mock rendering</div>
+      <h3>{result.summary.feedTitle || "Feed"} Google News Preview</h3>
+      <div className="google-preview-layout">
+        <GoogleStory item={lead} lead />
+        <div className="google-related-stack">
+          {related.slice(0, 4).map((item) => <GoogleStory item={item} key={`${item.index}-${item.link}`} />)}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function GoogleStory({ item, lead = false }: { item: ScanResponse["sampleItems"][number]; lead?: boolean }) {
   const analysis = item.articleAnalysis;
   const imageUrl = analysis?.primaryImageUrl || item.imageUrl;
   const headline = analysis?.headline || item.title || "Missing headline";
@@ -470,33 +509,104 @@ function ArticlePreviewCard({ item }: { item: ScanResponse["sampleItems"][number
   const source = analysis?.siteName || analysis?.publisher || hostLabel(item.link);
 
   return (
-    <article className="article-preview-card">
-      <div className="preview-labels">
-        <span>Google News</span>
-        <span>SmartNews</span>
-        <span>NewsBreak</span>
-      </div>
-      <div className="article-preview-body">
-        <div className="article-thumb">
-          {imageUrl ? <img src={imageUrl} alt="" /> : <span>No image</span>}
+    <article className={`google-story ${lead ? "lead" : ""}`}>
+      {imageUrl && (
+        <div className="google-story-image">
+          <img src={imageUrl} alt="" />
         </div>
-        <div className="article-copy">
-          <a href={item.link} target="_blank" rel="noreferrer">{headline}</a>
-          <p>{description}</p>
-          <small>{source} · {formatDate(analysis?.datePublished || item.publishedAt) || "Missing date"}</small>
-        </div>
+      )}
+      <div className="google-story-copy">
+        <a href={item.link} target="_blank" rel="noreferrer">{headline}</a>
+        {lead && <p>{description}</p>}
+        <small>{source} · {formatDate(analysis?.datePublished || item.publishedAt) || "Missing date"}</small>
       </div>
-      <div className="metadata-badges">
-        <Badge ok={Boolean(analysis?.hasArticleStructuredData)} label="Schema" />
-        <Badge ok={Boolean(analysis?.canonicalUrl)} label="Canonical" />
-        <Badge ok={Boolean(analysis?.author)} label="Author" />
-        <Badge ok={Boolean(analysis?.description)} label="Description" />
-        <Badge ok={Boolean(imageUrl)} label="Image" />
-        <Badge ok={Boolean(analysis?.hasMaxImagePreviewLarge)} label="Large preview" />
-      </div>
-      {item.issues.length > 0 && <p className="article-issues">{item.issues.join(", ")}</p>}
     </article>
   );
+}
+
+function SmartNewsPreview({ result }: { result: ScanResponse }) {
+  return (
+    <section className="smartnews-preview-card" aria-label="Mock SmartNews preview">
+      <div className="mock-label">Mock rendering</div>
+      <h3>{result.summary.feedTitle || "Feed"} SmartNews Preview</h3>
+      <div className="smartnews-list">
+        {result.sampleItems.map((item) => <SmartNewsStory item={item} key={`${item.index}-${item.link}`} />)}
+      </div>
+    </section>
+  );
+}
+
+function SmartNewsStory({ item }: { item: ScanResponse["sampleItems"][number] }) {
+  const analysis = item.articleAnalysis;
+  const headline = analysis?.headline || item.title || "Missing headline";
+  const source = analysis?.siteName || analysis?.publisher || hostLabel(item.link);
+  const hasSmartNewsThumbnail = item.hasThumbnail && Boolean(item.thumbnailUrl);
+
+  return (
+    <article className={`smartnews-story ${hasSmartNewsThumbnail ? "with-thumb" : ""}`}>
+      <div>
+        <a href={item.link} target="_blank" rel="noreferrer">{headline}</a>
+        <small>{source} · {formatDate(analysis?.datePublished || item.publishedAt) || "Missing date"}</small>
+      </div>
+      {hasSmartNewsThumbnail && (
+        <img src={item.thumbnailUrl} alt="" />
+      )}
+    </article>
+  );
+}
+
+function DiagnosticArticleTable({ items }: { items: ScanResponse["sampleItems"] }) {
+  return (
+    <div className="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Title</th>
+            <th>Date</th>
+            <th>Image</th>
+            <th>SmartNews thumbnail</th>
+            <th>Article page</th>
+            <th>Issues</th>
+          </tr>
+        </thead>
+        <tbody>
+          {items.map((item) => (
+            <tr key={`${item.index}-${item.link}`}>
+              <td>{item.index}</td>
+              <td>
+                <a href={item.link} target="_blank" rel="noreferrer">{item.title || "Missing title"}</a>
+              </td>
+              <td>{item.publishedAt || "Missing"}</td>
+              <td>{item.hasImage ? "Yes" : "No"}</td>
+              <td>{item.hasThumbnail ? "Yes" : "No"}</td>
+              <td>{articlePageSummary(item)}</td>
+              <td>{item.issues.length ? item.issues.join(", ") : "None"}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function articlePageSummary(item: ScanResponse["sampleItems"][number]) {
+  const analysis = item.articleAnalysis;
+  if (!analysis) return "Not checked";
+  if (!analysis.reachable) return "Unreachable";
+  return [
+    analysis.hasArticleStructuredData ? "Schema" : "No schema",
+    analysis.canonicalUrl ? "Canonical" : "No canonical",
+    analysis.author ? "Author" : "No author",
+    analysis.description ? "Description" : "No description"
+  ].join(" / ");
+}
+
+function articlePreviewTitle(mode: ArticlePreviewMode, feedTitle: string) {
+  const title = feedTitle || "Feed";
+  if (mode === "google_news") return `${title} Google News Preview`;
+  if (mode === "smartnews") return `${title} SmartNews Preview`;
+  return "Diagnostic Table";
 }
 
 function Badge({ ok, label }: { ok: boolean; label: string }) {

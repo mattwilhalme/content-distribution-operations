@@ -521,94 +521,193 @@ button:disabled {
 
 .table-section h2,
 .article-preview-section h2 {
+  margin: 0;
+}
+
+.article-preview-head {
+  display: flex;
+  gap: 16px;
+  align-items: end;
+  justify-content: space-between;
   margin: 22px 0 10px;
 }
 
-.article-preview-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 14px;
-}
-
-.article-preview-card {
-  display: grid;
-  gap: 12px;
-  padding: 14px;
-  border: 1px solid #d8ded7;
-  border-radius: 8px;
-  background: #ffffff;
-}
-
-.preview-labels,
-.metadata-badges {
+.preview-toggle {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 7px;
+  justify-content: flex-end;
 }
 
-.preview-labels span {
-  padding: 4px 7px;
-  border: 1px solid #d8ded7;
-  border-radius: 999px;
+.preview-toggle button {
+  min-height: 36px;
+  border: 1px solid #c9d2cf;
+  padding: 0 11px;
+  background: #ffffff;
   color: #526168;
+  font-size: 0.82rem;
+}
+
+.preview-toggle button.active {
+  border-color: #24706d;
+  background: #24706d;
+  color: #ffffff;
+}
+
+.mock-label {
+  width: max-content;
+  padding: 5px 8px;
+  border: 1px solid currentColor;
+  border-radius: 999px;
   font-size: 0.72rem;
   font-weight: 800;
+  opacity: 0.75;
 }
 
-.article-preview-body {
-  display: grid;
-  grid-template-columns: 132px minmax(0, 1fr);
-  gap: 13px;
-  align-items: start;
+.google-preview-card {
+  padding: 18px;
+  border-radius: 8px;
+  background: #111827;
+  color: #e5e7eb;
 }
 
-.article-thumb {
+.google-preview-card h3,
+.smartnews-preview-card h3 {
+  margin: 12px 0 14px;
+  font-size: 1.1rem;
+}
+
+.google-preview-layout {
   display: grid;
-  place-items: center;
+  grid-template-columns: minmax(0, 1.1fr) minmax(280px, 0.9fr);
+  gap: 16px;
+}
+
+.google-story {
+  display: grid;
+  grid-template-columns: 86px minmax(0, 1fr);
+  gap: 10px;
+  padding: 12px 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.google-story.lead {
+  display: block;
+  padding-top: 0;
+  border-top: 0;
+}
+
+.google-story-image {
   aspect-ratio: 4 / 3;
   overflow: hidden;
   border-radius: 8px;
-  background: #edf0ec;
-  color: #647278;
-  font-size: 0.8rem;
-  font-weight: 800;
+  background: #263244;
 }
 
-.article-thumb img {
+.google-story.lead .google-story-image {
+  margin-bottom: 12px;
+  aspect-ratio: 16 / 9;
+}
+
+.google-story-image img {
   width: 100%;
   height: 100%;
   object-fit: cover;
 }
 
-.article-copy {
+.google-story-copy {
   min-width: 0;
 }
 
-.article-copy a {
+.google-story-copy a {
   display: -webkit-box;
   overflow: hidden;
-  color: #172026;
-  font-size: 1.02rem;
+  color: #93c5fd;
   line-height: 1.25;
   text-decoration: none;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-}
-
-.article-copy p {
-  display: -webkit-box;
-  overflow: hidden;
-  margin: 7px 0;
-  color: #526168;
-  font-size: 0.9rem;
-  line-height: 1.38;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 3;
 }
 
-.article-copy small,
-.article-issues {
+.google-story.lead .google-story-copy a {
+  font-size: 1.35rem;
+  font-weight: 900;
+}
+
+.google-story-copy p {
+  display: -webkit-box;
+  overflow: hidden;
+  margin: 8px 0;
+  color: #cbd5e1;
+  line-height: 1.45;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
+.google-story-copy small {
+  color: #9ca3af;
+}
+
+.smartnews-preview-card {
+  max-width: 760px;
+  border: 1px solid #d8ded7;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.smartnews-preview-card .mock-label {
+  margin: 16px 16px 0;
+  color: #526168;
+}
+
+.smartnews-preview-card h3 {
+  padding: 0 16px;
+}
+
+.smartnews-list {
+  border-top: 1px solid #edf0ec;
+}
+
+.smartnews-story {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 14px;
+  align-items: start;
+  padding: 16px;
+  border-bottom: 1px solid #edf0ec;
+}
+
+.smartnews-story.with-thumb {
+  grid-template-columns: minmax(0, 1fr) 112px;
+}
+
+.smartnews-story div {
+  min-width: 0;
+}
+
+.smartnews-story a {
+  display: -webkit-box;
+  overflow: hidden;
+  color: #172026;
+  font-size: 1.18rem;
+  font-weight: 900;
+  line-height: 1.22;
+  text-decoration: none;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
+.smartnews-story small {
+  display: block;
+  margin-top: 8px;
   color: #647278;
+}
+
+.smartnews-story img {
+  width: 112px;
+  aspect-ratio: 4 / 3;
+  border-radius: 6px;
+  object-fit: cover;
 }
 
 .badge {

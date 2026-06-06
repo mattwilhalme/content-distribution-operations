@@ -35,6 +35,8 @@ export interface SampleItem {
   publishedAt: string;
   hasImage: boolean;
   imageUrl: string;
+  hasThumbnail: boolean;
+  thumbnailUrl: string;
   hasContentEncoded: boolean;
   bodyLength: number;
   likelyFullText: boolean;

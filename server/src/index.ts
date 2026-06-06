@@ -634,6 +634,8 @@ function toSampleItem(item: NormalizedItem, index: number): SampleItem {
     publishedAt: item.publishedAt,
     hasImage: item.imageUrls.length > 0,
     imageUrl: item.imageUrls[0] ?? "",
+    hasThumbnail: item.thumbnailUrls.length > 0,
+    thumbnailUrl: item.thumbnailUrls[0] ?? "",
     hasContentEncoded: item.hasContentEncoded,
     bodyLength: bodyLength(item.body),
     likelyFullText: likelyFullText(item.body),
