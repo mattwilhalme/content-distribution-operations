@@ -17,7 +17,7 @@ export async function saveArticleChecks(scanRunId: string, publisherId: string, 
         reachable: analysis?.reachable,
         http_status: analysis?.statusCode,
         has_og_title: Boolean(analysis?.headline),
-        has_og_description: false,
+        has_og_description: Boolean(analysis?.description),
         has_og_image: (analysis?.imageUrls.length ?? 0) > 0,
         has_twitter_card: false,
         has_article_schema: Boolean(analysis?.hasArticleStructuredData),
@@ -48,6 +48,7 @@ function scoreArticle(item: SampleItem): number {
   if (!analysis?.reachable) score -= 30;
   if (!analysis?.hasArticleStructuredData) score -= 15;
   if (!analysis?.headline && !item.title) score -= 10;
+  if (!analysis?.description) score -= 5;
   if ((analysis?.imageUrls.length ?? 0) === 0 && !item.hasImage) score -= 10;
   if (!analysis?.datePublished && !item.publishedAt) score -= 10;
   if (!analysis?.author) score -= 10;

@@ -44,6 +44,7 @@ export default function App() {
   const [selectedPublisherId, setSelectedPublisherId] = useState("");
   const [selectedChannel, setSelectedChannel] = useState<ResultChannel>("smartnews");
   const [viewMode, setViewMode] = useState<ViewMode>("dashboard");
+  const [showPassedChecks, setShowPassedChecks] = useState(false);
 
   useEffect(() => {
     void refreshOperations();
@@ -371,40 +372,22 @@ export default function App() {
           </section>
 
           <section className="checks-grid">
-            <CheckGroup title="Critical" checks={grouped.critical} />
+            <CheckGroup title="Blockers" checks={grouped.critical} />
             <CheckGroup title="Warnings" checks={[...grouped.failed, ...grouped.warnings]} />
-            <CheckGroup title="Passed" checks={grouped.passed} />
+            <CheckGroup
+              title="Passed checks"
+              checks={grouped.passed}
+              collapsed={!showPassedChecks}
+              onToggle={() => setShowPassedChecks((current) => !current)}
+            />
           </section>
 
-          <section className="table-section">
+          <section className="article-preview-section">
             <h2>Sample article analysis</h2>
-            <div className="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>#</th>
-                    <th>Title</th>
-                    <th>Date</th>
-                    <th>Image</th>
-                    <th>Article page</th>
-                    <th>Issues</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {result.sampleItems.map((item) => (
-                    <tr key={`${item.index}-${item.link}`}>
-                      <td>{item.index}</td>
-                      <td>
-                        <a href={item.link} target="_blank" rel="noreferrer">{item.title || "Missing title"}</a>
-                      </td>
-                      <td>{item.publishedAt || "Missing"}</td>
-                      <td>{item.hasImage ? "Yes" : "No"}</td>
-                      <td>{articlePageSummary(item)}</td>
-                      <td>{item.issues.length ? item.issues.join(", ") : "None"}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+            <div className="article-preview-grid">
+              {result.sampleItems.map((item) => (
+                <ArticlePreviewCard item={item} key={`${item.index}-${item.link}`} />
+              ))}
             </div>
           </section>
         </>
@@ -437,11 +420,30 @@ function ScoreCard({ title, score, status, selected, onSelect }: { title: string
   );
 }
 
-function CheckGroup({ title, checks }: { title: string; checks: FeedCheck[] }) {
+function CheckGroup({
+  title,
+  checks,
+  collapsed = false,
+  onToggle
+}: {
+  title: string;
+  checks: FeedCheck[];
+  collapsed?: boolean;
+  onToggle?: () => void;
+}) {
   return (
     <section className="panel check-group">
-      <h2>{title}</h2>
-      {checks.length ? (
+      <div className="check-group-head">
+        <h2>{title}</h2>
+        {onToggle && (
+          <button className="secondary-button" type="button" onClick={onToggle}>
+            {collapsed ? `Show ${checks.length}` : "Hide"}
+          </button>
+        )}
+      </div>
+      {collapsed ? (
+        <p className="clean">{checks.length} passed checks hidden.</p>
+      ) : checks.length ? (
         <div className="check-list">
           {checks.map((check) => (
             <article className={`check ${check.status}`} key={check.id}>
@@ -460,16 +462,53 @@ function CheckGroup({ title, checks }: { title: string; checks: FeedCheck[] }) {
   );
 }
 
-function articlePageSummary(item: ScanResponse["sampleItems"][number]) {
+function ArticlePreviewCard({ item }: { item: ScanResponse["sampleItems"][number] }) {
   const analysis = item.articleAnalysis;
-  if (!analysis) return "Not checked";
-  if (!analysis.reachable) return "Unreachable";
-  const parts = [
-    analysis.hasArticleStructuredData ? "Schema" : "No schema",
-    analysis.canonicalUrl ? "Canonical" : "No canonical",
-    analysis.author ? "Author" : "No author"
-  ];
-  return parts.join(" / ");
+  const imageUrl = analysis?.primaryImageUrl || item.imageUrl;
+  const headline = analysis?.headline || item.title || "Missing headline";
+  const description = analysis?.description || item.issues.slice(0, 2).join(". ") || "No article description found in page metadata.";
+  const source = analysis?.siteName || analysis?.publisher || hostLabel(item.link);
+
+  return (
+    <article className="article-preview-card">
+      <div className="preview-labels">
+        <span>Google News</span>
+        <span>SmartNews</span>
+        <span>NewsBreak</span>
+      </div>
+      <div className="article-preview-body">
+        <div className="article-thumb">
+          {imageUrl ? <img src={imageUrl} alt="" /> : <span>No image</span>}
+        </div>
+        <div className="article-copy">
+          <a href={item.link} target="_blank" rel="noreferrer">{headline}</a>
+          <p>{description}</p>
+          <small>{source} · {formatDate(analysis?.datePublished || item.publishedAt) || "Missing date"}</small>
+        </div>
+      </div>
+      <div className="metadata-badges">
+        <Badge ok={Boolean(analysis?.hasArticleStructuredData)} label="Schema" />
+        <Badge ok={Boolean(analysis?.canonicalUrl)} label="Canonical" />
+        <Badge ok={Boolean(analysis?.author)} label="Author" />
+        <Badge ok={Boolean(analysis?.description)} label="Description" />
+        <Badge ok={Boolean(imageUrl)} label="Image" />
+        <Badge ok={Boolean(analysis?.hasMaxImagePreviewLarge)} label="Large preview" />
+      </div>
+      {item.issues.length > 0 && <p className="article-issues">{item.issues.join(", ")}</p>}
+    </article>
+  );
+}
+
+function Badge({ ok, label }: { ok: boolean; label: string }) {
+  return <span className={ok ? "badge ok" : "badge warn"}>{label}</span>;
+}
+
+function hostLabel(value: string) {
+  try {
+    return new URL(value).hostname.replace(/^www\./, "");
+  } catch {
+    return "Unknown publisher";
+  }
 }
 
 function checkMessage(check: FeedCheck) {

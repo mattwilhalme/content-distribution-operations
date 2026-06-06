@@ -60,7 +60,10 @@ interface ArticlePageAnalysis {
   statusCode?: number;
   hasArticleStructuredData: boolean;
   headline: string;
+  description: string;
+  siteName: string;
   imageUrls: string[];
+  primaryImageUrl: string;
   datePublished: string;
   dateModified: string;
   author: string;
@@ -511,7 +514,10 @@ async function inspectArticlePage(url: string): Promise<ArticlePageAnalysis | un
       reachable: false,
       hasArticleStructuredData: false,
       headline: "",
+      description: "",
+      siteName: "",
       imageUrls: [],
+      primaryImageUrl: "",
       datePublished: "",
       dateModified: "",
       author: "",
@@ -535,7 +541,10 @@ function extractArticlePageMetadata(html: string): Omit<ArticlePageAnalysis, "re
   return {
     hasArticleStructuredData: Boolean(articleNode),
     headline: textValue(readSchemaField(articleNode, "headline")) || metaContent(html, "property", "og:title") || htmlTitle(html),
+    description: textValue(readSchemaField(articleNode, "description")) || metaContent(html, "property", "og:description") || metaContent(html, "name", "twitter:description") || metaContent(html, "name", "description"),
+    siteName: metaContent(html, "property", "og:site_name") || schemaPublisher(articleNode),
     imageUrls,
+    primaryImageUrl: imageUrls[0] ?? "",
     datePublished: textValue(readSchemaField(articleNode, "datePublished")) || metaContent(html, "property", "article:published_time"),
     dateModified: textValue(readSchemaField(articleNode, "dateModified")) || metaContent(html, "property", "article:modified_time"),
     author: schemaAuthor(articleNode) || metaContent(html, "name", "author"),
@@ -639,7 +648,10 @@ function toArticleAnalysis(analysis: ArticlePageAnalysis): ArticleAnalysis {
     statusCode: analysis.statusCode,
     hasArticleStructuredData: analysis.hasArticleStructuredData,
     headline: analysis.headline,
+    description: analysis.description,
+    siteName: analysis.siteName,
     imageUrls: analysis.imageUrls,
+    primaryImageUrl: analysis.primaryImageUrl,
     datePublished: analysis.datePublished,
     dateModified: analysis.dateModified,
     author: analysis.author,

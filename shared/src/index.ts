@@ -47,7 +47,10 @@ export interface ArticleAnalysis {
   statusCode?: number;
   hasArticleStructuredData: boolean;
   headline: string;
+  description: string;
+  siteName: string;
   imageUrls: string[];
+  primaryImageUrl: string;
   datePublished: string;
   dateModified: string;
   author: string;
