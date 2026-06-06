@@ -90,7 +90,7 @@ export default function App() {
           <section className="platforms">
             <Platform title="SmartNews" issues={result.platforms.smartnews.issues} />
             <Platform title="NewsBreak" issues={result.platforms.newsbreak.issues} />
-            <Platform title="Google News" issues={result.platforms.googleNews.issues} note="Google News is scored against shared feed health plus Google-specific freshness and canonical-link checks. SmartNews-only requirements like snf:logo, author, full content, and media:thumbnail do not lower this score." />
+            <Platform title="Google News" issues={result.platforms.googleNews.issues} note="Google News readiness now emphasizes crawlable article pages, Article/NewsArticle structured data, canonical URLs, dates, authors, images, language, and freshness. Feed signals still help discovery, but Publisher Center-submitted RSS sections are no longer the core path." />
             <Platform title="Apple News" issues={result.platforms.appleNews.issues} note="Apple News is treated as conversion readiness for a later API/ANF integration." />
           </section>
 

@@ -30,6 +30,7 @@ interface NormalizedItem {
   hasLeadImageInContent: boolean;
   imageUrls: string[];
   thumbnailUrls: string[];
+  pageAnalysis?: ArticlePageAnalysis;
 }
 
 interface NormalizedFeed {
@@ -42,6 +43,21 @@ interface NormalizedFeed {
   logoUrl: string;
   ttl: string;
   items: NormalizedItem[];
+}
+
+interface ArticlePageAnalysis {
+  reachable: boolean;
+  statusCode?: number;
+  hasArticleStructuredData: boolean;
+  headline: string;
+  imageUrls: string[];
+  datePublished: string;
+  dateModified: string;
+  author: string;
+  publisher: string;
+  canonicalUrl: string;
+  hasLargeImageHint: boolean;
+  hasMaxImagePreviewLarge: boolean;
 }
 
 const parser = new XMLParser({
@@ -83,7 +99,7 @@ app.post("/api/scan", async (req, res) => {
     });
 
     const xml = await response.text();
-    const scan = scanFeed(url, response.ok, parsedUrl.protocol === "https:", xml, response.status);
+    const scan = await scanFeed(url, response.ok, parsedUrl.protocol === "https:", xml, response.status);
     res.status(response.ok ? 200 : 502).json(scan);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to fetch feed.";
@@ -91,7 +107,7 @@ app.post("/api/scan", async (req, res) => {
   }
 });
 
-function scanFeed(url: string, reachable: boolean, isHttps: boolean, xml: string, statusCode?: number): ScanResponse {
+async function scanFeed(url: string, reachable: boolean, isHttps: boolean, xml: string, statusCode?: number): Promise<ScanResponse> {
   const fetchedAt = new Date().toISOString();
   const checks: FeedCheck[] = [];
 
@@ -112,6 +128,7 @@ function scanFeed(url: string, reachable: boolean, isHttps: boolean, xml: string
   }
 
   const feed = normalizeFeed(parsed);
+  await attachArticlePageAnalysis(feed.items.slice(0, 5));
   const itemCount = feed.items.length;
   const duplicateLinks = duplicates(feed.items.map((item) => item.link).filter(Boolean));
   const duplicateGuids = duplicates(feed.items.map((item) => item.guid).filter(Boolean));
@@ -131,11 +148,26 @@ function scanFeed(url: string, reachable: boolean, isHttps: boolean, xml: string
   const shortOrPartialContent = itemCount - fullTextItems;
   const shortBodies = feed.items.filter((item) => bodyLength(item.body) > 0 && bodyLength(item.body) < 300).length;
   const freshItems = feed.items.filter((item) => isFreshDate(item.publishedAt)).length;
+  const recentNewsItems = feed.items.filter((item) => isRecentNewsDate(item.publishedAt)).length;
+  const futureDates = feed.items.filter((item) => isFutureDate(item.publishedAt)).length;
   const missingAuthors = feed.items.filter((item) => !item.author).length;
   const itemsWithLeadImages = feed.items.filter((item) => item.hasLeadImageInContent).length;
   const linksWithUtm = feed.items.filter((item) => hasUtmParameters(item.link)).length;
+  const titlesWithFeedNoise = feed.items.filter((item) => titleIncludesSourceOrDate(item.title, feed.title)).length;
   const feedSizeBytes = Buffer.byteLength(xml, "utf8");
   const smartNewsThumbnailStatus: CheckStatus = missingThumbnails === 0 ? "pass" : missingThumbnails > 3 || missingThumbnails / Math.max(itemCount, 1) > 0.2 ? "fail" : "warn";
+  const sampledItems = feed.items.slice(0, 5);
+  const analyzedPages = sampledItems.filter((item) => item.pageAnalysis);
+  const reachablePages = analyzedPages.filter((item) => item.pageAnalysis?.reachable).length;
+  const pagesWithArticleSchema = analyzedPages.filter((item) => item.pageAnalysis?.hasArticleStructuredData).length;
+  const pagesWithHeadline = analyzedPages.filter((item) => item.pageAnalysis?.headline || item.title).length;
+  const pagesWithImages = analyzedPages.filter((item) => (item.pageAnalysis?.imageUrls.length ?? 0) > 0 || item.imageUrls.length > 0).length;
+  const pagesWithDates = analyzedPages.filter((item) => item.pageAnalysis?.datePublished || item.publishedAt).length;
+  const pagesWithAuthors = analyzedPages.filter((item) => item.pageAnalysis?.author || item.author).length;
+  const pagesWithModifiedDates = analyzedPages.filter((item) => item.pageAnalysis?.dateModified).length;
+  const pagesWithCanonical = analyzedPages.filter((item) => item.pageAnalysis?.canonicalUrl).length;
+  const pagesWithLargeImageHints = analyzedPages.filter((item) => item.pageAnalysis?.hasLargeImageHint).length;
+  const pagesWithMaxImagePreviewLarge = analyzedPages.filter((item) => item.pageAnalysis?.hasMaxImagePreviewLarge).length;
 
   addCheck(checks, "feed-type", "RSS or Atom detected", feed.feedType !== "unknown" ? "pass" : "fail", "critical", "general", feed.feedType !== "unknown" ? `Detected ${feed.feedType.toUpperCase()} feed format.` : "Could not detect RSS or Atom format.", "Publish a valid RSS 2.0, Atom, or MRSS feed.");
   addCheck(checks, "feed-title", "Feed title", feed.title ? "pass" : "fail", "high", "general", feed.title ? `Feed title found: ${feed.title}` : "The feed is missing a channel/feed title.", "Add a clear publisher or section title to the feed.");
@@ -181,6 +213,21 @@ function scanFeed(url: string, reachable: boolean, isHttps: boolean, xml: string
 
   addCheck(checks, "google-fresh-dates", "Google News fresh dates", freshItems > 0 ? "pass" : "warn", "medium", "google_news", `${freshItems} item${freshItems === 1 ? "" : "s"} published in the last 7 days.`, "Keep recent articles in the feed and use accurate publication dates.");
   addCheck(checks, "google-canonical-links", "Google News canonical links", missingLinks === 0 && duplicateLinks.length === 0 ? "pass" : "fail", "high", "google_news", "Google News readiness depends on clean, unique canonical article links.", "Use permanent article URLs and avoid duplicate feed entries.");
+  addCheck(checks, "google-news-transition", "Google News crawl-based eligibility", "pass", "medium", "google_news", "Google News now relies on automated web crawling for publication pages rather than Publisher Center-submitted RSS sections.", "Use the feed as a discovery aid, but make article pages crawlable, indexable, and well structured.");
+  addCheck(checks, "google-sample-pages-reachable", "Google News sample article pages reachable", analyzedPages.length > 0 && reachablePages === analyzedPages.length ? "pass" : "fail", "critical", "google_news", `${reachablePages} of ${sampledItems.length} sampled article pages were reachable for metadata inspection.`, "Make every article URL a public, crawlable HTML page with a stable 200-level response.");
+  addCheck(checks, "google-article-schema", "Google Article structured data", pagesWithArticleSchema === analyzedPages.length && analyzedPages.length > 0 ? "pass" : "warn", "high", "google_news", `${pagesWithArticleSchema} of ${analyzedPages.length} sampled article pages expose Article, NewsArticle, or BlogPosting structured data.`, "Add JSON-LD Article or NewsArticle structured data to article pages so Google can identify headline, image, author, and dates.");
+  addCheck(checks, "google-headline", "Google headline/title", pagesWithHeadline === sampledItems.length && titlesWithFeedNoise === 0 ? "pass" : "warn", "high", "google_news", titlesWithFeedNoise === 0 ? `${pagesWithHeadline} of ${sampledItems.length} sampled items have article titles/headlines.` : `${titlesWithFeedNoise} feed title${titlesWithFeedNoise === 1 ? "" : "s"} appear to include source/date noise.`, "Use concise article headlines; do not append author, publication name, or publication date to the article title.");
+  addCheck(checks, "google-article-images", "Google article images", pagesWithImages === sampledItems.length && sampledItems.length > 0 ? "pass" : "warn", "high", "google_news", `${pagesWithImages} of ${sampledItems.length} sampled items expose an article image via structured data, page metadata, or feed media.`, "Provide relevant representative images through Article image, og:image, media tags, or image markup.");
+  addCheck(checks, "google-large-image-hints", "Google large image hints", pagesWithLargeImageHints > 0 ? "pass" : "warn", "medium", "google_news", `${pagesWithLargeImageHints} of ${analyzedPages.length} sampled article pages include multiple/high-quality image hints.`, "For best results, provide multiple high-resolution article images, ideally 16x9, 4x3, and 1x1 variants.");
+  addCheck(checks, "google-max-image-preview", "Google max-image-preview", pagesWithMaxImagePreviewLarge > 0 ? "pass" : "warn", "medium", "google_news", `${pagesWithMaxImagePreviewLarge} of ${analyzedPages.length} sampled article pages allow large image previews.`, "Use max-image-preview:large unless the site intentionally limits image previews.");
+  addCheck(checks, "google-article-dates", "Google article dates", pagesWithDates === sampledItems.length && futureDates === 0 ? "pass" : "fail", "critical", "google_news", futureDates === 0 ? `${pagesWithDates} of ${sampledItems.length} sampled items expose publication dates.` : `${futureDates} item date${futureDates === 1 ? " is" : "s are"} in the future.`, "Expose accurate publication dates and never use future dates for article publication time.");
+  addCheck(checks, "google-date-format", "Google date format precision", invalidDates === 0 ? "pass" : "fail", "high", "google_news", invalidDates === 0 ? "All feed dates are parseable." : `${invalidDates} feed date value${invalidDates === 1 ? "" : "s"} could not be parsed.`, "Use parseable publication dates; page structured data should use ISO 8601 with timezone when possible.");
+  addCheck(checks, "google-recent-news-window", "Google News recent article window", recentNewsItems > 0 ? "pass" : "warn", "medium", "google_news", `${recentNewsItems} item${recentNewsItems === 1 ? "" : "s"} published in the last 2 days.`, "For News sitemap-style discovery, keep the most recent two days of news URLs current.");
+  addCheck(checks, "google-author", "Google author metadata", pagesWithAuthors === sampledItems.length && sampledItems.length > 0 ? "pass" : "warn", "medium", "google_news", `${pagesWithAuthors} of ${sampledItems.length} sampled items expose author information.`, "Add author data in Article structured data or feed metadata for clearer article attribution.");
+  addCheck(checks, "google-date-modified", "Google modified date metadata", pagesWithModifiedDates > 0 ? "pass" : "warn", "low", "google_news", `${pagesWithModifiedDates} of ${analyzedPages.length} sampled article pages expose dateModified.`, "Add dateModified when applicable to help Google understand meaningful article updates.");
+  addCheck(checks, "google-canonical-page", "Google page canonical URL", pagesWithCanonical > 0 ? "pass" : "warn", "medium", "google_news", `${pagesWithCanonical} of ${analyzedPages.length} sampled article pages expose a canonical URL.`, "Use rel=canonical on article pages and keep feed links aligned to the canonical article URL.");
+  addCheck(checks, "google-language", "Google language signal", feed.language ? "pass" : "warn", "medium", "google_news", feed.language ? `Feed language found: ${feed.language}.` : "No feed-level language found.", "Use a clear language signal for news content and avoid mixing multiple languages in a single article.");
+  addCheck(checks, "google-publication-name", "Google publication name", feed.title ? "pass" : "warn", "medium", "google_news", feed.title ? `Publication/feed name found: ${feed.title}.` : "No publication/feed name found.", "Keep the publication name consistent with the site name used on article pages and Google News surfaces.");
 
   addCheck(checks, "apple-structured-data", "Apple News conversion readiness", completeCoreItems === itemCount && fullTextItems > 0 && itemsWithImages > 0 ? "pass" : "warn", "high", "apple_news", "Checks whether the feed has enough structured article data to convert later into Apple News Format.", "For later Apple News API/ANF publishing, preserve title, body, image, date, and canonical URL fields.");
 
@@ -302,6 +349,70 @@ function extractThumbnailUrls(item: Record<string, unknown>): string[] {
       return textValue(node);
     })
     .filter(Boolean);
+}
+
+async function attachArticlePageAnalysis(items: NormalizedItem[]) {
+  await Promise.all(items.map(async (item) => {
+    item.pageAnalysis = await inspectArticlePage(item.link);
+  }));
+}
+
+async function inspectArticlePage(url: string): Promise<ArticlePageAnalysis | undefined> {
+  if (!isHttpUrl(url)) return undefined;
+
+  try {
+    const response = await fetch(url, {
+      headers: {
+        "User-Agent": "ContentDistributionOperations/0.1 Google News metadata scanner"
+      },
+      signal: AbortSignal.timeout(8000)
+    });
+    const html = await response.text();
+    const metadata = extractArticlePageMetadata(html);
+
+    return {
+      ...metadata,
+      reachable: response.ok,
+      statusCode: response.status
+    };
+  } catch {
+    return {
+      reachable: false,
+      hasArticleStructuredData: false,
+      headline: "",
+      imageUrls: [],
+      datePublished: "",
+      dateModified: "",
+      author: "",
+      publisher: "",
+      canonicalUrl: "",
+      hasLargeImageHint: false,
+      hasMaxImagePreviewLarge: false
+    };
+  }
+}
+
+function extractArticlePageMetadata(html: string): Omit<ArticlePageAnalysis, "reachable" | "statusCode"> {
+  const jsonLdNodes = extractJsonLdNodes(html);
+  const articleNode = jsonLdNodes.find(isArticleSchemaNode);
+  const imageUrls = uniqueStrings([
+    ...extractSchemaImageUrls(articleNode),
+    metaContent(html, "property", "og:image"),
+    metaContent(html, "name", "twitter:image")
+  ]);
+
+  return {
+    hasArticleStructuredData: Boolean(articleNode),
+    headline: textValue(readSchemaField(articleNode, "headline")) || metaContent(html, "property", "og:title") || htmlTitle(html),
+    imageUrls,
+    datePublished: textValue(readSchemaField(articleNode, "datePublished")) || metaContent(html, "property", "article:published_time"),
+    dateModified: textValue(readSchemaField(articleNode, "dateModified")) || metaContent(html, "property", "article:modified_time"),
+    author: schemaAuthor(articleNode) || metaContent(html, "name", "author"),
+    publisher: schemaPublisher(articleNode),
+    canonicalUrl: canonicalUrl(html),
+    hasLargeImageHint: imageUrls.length >= 2 || hasImageDimensionHint(html, 1200),
+    hasMaxImagePreviewLarge: /max-image-preview\s*:\s*large/i.test(html)
+  };
 }
 
 function buildResponse(url: string, fetchedAt: string, feed: NormalizedFeed, checks: FeedCheck[]): ScanResponse {
@@ -429,6 +540,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function textValue(value: unknown): string {
   if (value === undefined || value === null) return "";
   if (typeof value === "string" || typeof value === "number") return String(value).trim();
+  if (Array.isArray(value)) return textValue(value[0]);
   if (isRecord(value)) {
     return textValue(value["#cdata"]) || textValue(value["#text"]);
   }
@@ -472,6 +584,10 @@ function duplicates(values: string[]): string[] {
   return Array.from(duplicateValues);
 }
 
+function uniqueStrings(values: string[]): string[] {
+  return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean)));
+}
+
 function bodyLength(body: string): number {
   return stripHtml(body).length;
 }
@@ -497,10 +613,143 @@ function hasUtmParameters(value: string): boolean {
   }
 }
 
+function isHttpUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return url.protocol === "http:" || url.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+function isFutureDate(value: string): boolean {
+  const time = Date.parse(value);
+  if (Number.isNaN(time)) return false;
+  return time > Date.now() + 5 * 60 * 1000;
+}
+
 function isFreshDate(value: string): boolean {
   const time = Date.parse(value);
   if (Number.isNaN(time)) return false;
   return Date.now() - time <= 7 * 24 * 60 * 60 * 1000;
+}
+
+function isRecentNewsDate(value: string): boolean {
+  const time = Date.parse(value);
+  if (Number.isNaN(time)) return false;
+  return Date.now() - time <= 2 * 24 * 60 * 60 * 1000;
+}
+
+function titleIncludesSourceOrDate(title: string, feedTitle: string): boolean {
+  if (!title) return false;
+  const lowerTitle = title.toLowerCase();
+  const lowerFeedTitle = feedTitle.toLowerCase();
+  const containsFeedTitle = Boolean(lowerFeedTitle && lowerTitle.includes(lowerFeedTitle));
+  const containsDate = /\b(?:19|20)\d{2}\b|(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\.? \d{1,2}/i.test(title);
+  return containsFeedTitle || containsDate;
+}
+
+function extractJsonLdNodes(html: string): unknown[] {
+  const scripts = html.matchAll(/<script\b[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi);
+  return Array.from(scripts).flatMap((match) => {
+    const content = decodeHtmlEntities(stripHtmlComments(match[1]).trim());
+    try {
+      const parsed = JSON.parse(content);
+      return flattenJsonLd(parsed);
+    } catch {
+      return [];
+    }
+  });
+}
+
+function flattenJsonLd(value: unknown): unknown[] {
+  if (Array.isArray(value)) return value.flatMap(flattenJsonLd);
+  if (!isRecord(value)) return [];
+  const graph = value["@graph"];
+  return [value, ...flattenJsonLd(graph)];
+}
+
+function isArticleSchemaNode(value: unknown): boolean {
+  if (!isRecord(value)) return false;
+  return arrayOf(value["@type"]).some((type) => ["Article", "NewsArticle", "BlogPosting"].includes(textValue(type)));
+}
+
+function readSchemaField(node: unknown, field: string): unknown {
+  return isRecord(node) ? node[field] : undefined;
+}
+
+function extractSchemaImageUrls(node: unknown): string[] {
+  return arrayOf(readSchemaField(node, "image")).flatMap((image) => {
+    if (typeof image === "string") return [image];
+    if (isRecord(image)) return [textValue(image.url), textValue(image.contentUrl)];
+    return [];
+  }).filter(Boolean);
+}
+
+function schemaAuthor(node: unknown): string {
+  return arrayOf(readSchemaField(node, "author"))
+    .map((author) => isRecord(author) ? textValue(author.name) : textValue(author))
+    .filter(Boolean)
+    .join(", ");
+}
+
+function schemaPublisher(node: unknown): string {
+  const publisher = readSchemaField(node, "publisher");
+  if (isRecord(publisher)) return textValue(publisher.name);
+  return textValue(publisher);
+}
+
+function metaContent(html: string, attrName: "name" | "property", attrValue: string): string {
+  const escaped = escapeRegExp(attrValue);
+  const patterns = [
+    new RegExp(`<meta\\b(?=[^>]*\\b${attrName}=["']${escaped}["'])(?=[^>]*\\bcontent=["']([^"']+)["'])[^>]*>`, "i"),
+    new RegExp(`<meta\\b(?=[^>]*\\bcontent=["']([^"']+)["'])(?=[^>]*\\b${attrName}=["']${escaped}["'])[^>]*>`, "i")
+  ];
+
+  for (const pattern of patterns) {
+    const match = html.match(pattern);
+    if (match?.[1]) return decodeHtmlEntities(match[1].trim());
+  }
+
+  return "";
+}
+
+function htmlTitle(html: string): string {
+  const match = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+  return match?.[1] ? decodeHtmlEntities(stripHtml(match[1])) : "";
+}
+
+function canonicalUrl(html: string): string {
+  const match = html.match(/<link\b(?=[^>]*\brel=["'][^"']*\bcanonical\b[^"']*["'])(?=[^>]*\bhref=["']([^"']+)["'])[^>]*>/i);
+  return match?.[1] ? decodeHtmlEntities(match[1].trim()) : "";
+}
+
+function hasImageDimensionHint(html: string, minWidth: number): boolean {
+  const imageMatches = html.matchAll(/<(?:meta|img)\b[^>]*(?:width=["']?(\d+)["']?|content=["'][^"']*(?:[?&](?:w|width)=(\d+)|[-_](\d{3,5})x\d{3,5})[^"']*["'])[^>]*>/gi);
+  for (const match of imageMatches) {
+    const width = Number(match[1] || match[2] || match[3] || 0);
+    if (width >= minWidth) return true;
+  }
+  return false;
+}
+
+function stripHtmlComments(value: string): string {
+  return value.replace(/<!--[\s\S]*?-->/g, "");
+}
+
+function decodeHtmlEntities(value: string): string {
+  return value
+    .replace(/&quot;/g, "\"")
+    .replace(/&#34;/g, "\"")
+    .replace(/&apos;/g, "'")
+    .replace(/&#39;/g, "'")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">");
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 app.listen(PORT, () => {
