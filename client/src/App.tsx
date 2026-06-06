@@ -1,5 +1,5 @@
 import { FormEvent, useMemo, useState } from "react";
-import type { CheckStatus, FeedCheck, ScanResponse } from "@content-distribution-operations/shared";
+import type { CheckPlatform, FeedCheck, ScanResponse } from "@content-distribution-operations/shared";
 
 const starterFeed = "https://www.npr.org/rss/rss.php?id=1001";
 
@@ -196,6 +196,6 @@ function formatStatus(status: string) {
   return status.replace("_", " ");
 }
 
-function platformLabel(platform: CheckStatus | FeedCheck["platform"]) {
+function platformLabel(platform: CheckPlatform) {
   return String(platform).replace("_", " ");
 }

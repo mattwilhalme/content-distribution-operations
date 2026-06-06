@@ -73,20 +73,24 @@ app.post("/api/scan", async (req, res) => {
     });
 
     const xml = await response.text();
-    const scan = scanFeed(url, response.ok, parsedUrl.protocol === "https:", xml);
-    res.json(scan);
+    const scan = scanFeed(url, response.ok, parsedUrl.protocol === "https:", xml, response.status);
+    res.status(response.ok ? 200 : 502).json(scan);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to fetch feed.";
     res.status(502).json({ error: message });
   }
 });
 
-function scanFeed(url: string, reachable: boolean, isHttps: boolean, xml: string): ScanResponse {
+function scanFeed(url: string, reachable: boolean, isHttps: boolean, xml: string, statusCode?: number): ScanResponse {
   const fetchedAt = new Date().toISOString();
   const checks: FeedCheck[] = [];
 
-  addCheck(checks, "url-reachable", "URL reachable", reachable ? "pass" : "fail", "critical", "general", reachable ? "The feed URL responded." : "The feed URL did not return a successful response.", "Confirm the feed URL is public and returns a 200-level response.");
+  addCheck(checks, "url-reachable", "URL reachable", reachable ? "pass" : "fail", "critical", "general", reachable ? "The feed URL returned a successful response." : `The feed URL returned HTTP ${statusCode ?? "error"}.`, "Confirm the feed URL is public and returns a 200-level response.");
   addCheck(checks, "https", "HTTPS feed URL", isHttps ? "pass" : "warn", "medium", "general", isHttps ? "The feed uses HTTPS." : "The feed URL is not HTTPS.", "Use HTTPS for feed URLs and media assets.");
+
+  if (!reachable) {
+    return buildResponse(url, fetchedAt, { feedType: "unknown", title: "", items: [] }, checks);
+  }
 
   let parsed: unknown;
   try {
@@ -267,9 +271,12 @@ function buildResponse(url: string, fetchedAt: string, feed: NormalizedFeed, che
 }
 
 function platformReadiness(checks: FeedCheck[], platform: CheckPlatform): PlatformReadiness {
-  const platformChecks = checks.filter((check) => check.platform === platform || (platform !== "apple_news" && ["general", "media", "content"].includes(check.platform)));
+  const sharedPlatforms: CheckPlatform[] = ["general", "media", "content"];
+  const platformChecks = checks.filter((check) => check.platform === platform || sharedPlatforms.includes(check.platform));
   const score = scoreChecks(platformChecks);
-  const issues = platformChecks.filter((check) => check.status !== "pass").map((check) => check.message);
+  const issues = platformChecks
+    .filter((check) => check.status !== "pass")
+    .map((check) => `${check.label}: ${check.message}`);
 
   return {
     score,
