@@ -572,7 +572,8 @@ button:disabled {
 }
 
 .google-preview-card h3,
-.smartnews-preview-card h3 {
+.smartnews-preview-card h3,
+.newsbreak-preview-card h3 {
   margin: 12px 0 14px;
   font-size: 1.1rem;
 }
@@ -648,23 +649,27 @@ button:disabled {
   color: #9ca3af;
 }
 
-.smartnews-preview-card {
+.smartnews-preview-card,
+.newsbreak-preview-card {
   max-width: 760px;
   border: 1px solid #d8ded7;
   border-radius: 8px;
   background: #ffffff;
 }
 
-.smartnews-preview-card .mock-label {
+.smartnews-preview-card .mock-label,
+.newsbreak-preview-card .mock-label {
   margin: 16px 16px 0;
   color: #526168;
 }
 
-.smartnews-preview-card h3 {
+.smartnews-preview-card h3,
+.newsbreak-preview-card h3 {
   padding: 0 16px;
 }
 
-.smartnews-list {
+.smartnews-list,
+.newsbreak-list {
   border-top: 1px solid #edf0ec;
 }
 
@@ -725,6 +730,57 @@ button:disabled {
 
 .smartnews-missing-thumb span {
   display: block;
+}
+
+.newsbreak-preview-card {
+  background: #f8fafc;
+}
+
+.newsbreak-story {
+  display: grid;
+  grid-template-columns: 140px minmax(0, 1fr);
+  gap: 14px;
+  padding: 16px;
+  border-bottom: 1px solid #e2e8f0;
+  background: #ffffff;
+}
+
+.newsbreak-story img {
+  width: 140px;
+  aspect-ratio: 4 / 3;
+  border-radius: 8px;
+  object-fit: cover;
+}
+
+.newsbreak-copy {
+  min-width: 0;
+}
+
+.newsbreak-copy a {
+  display: -webkit-box;
+  overflow: hidden;
+  color: #172026;
+  font-size: 1.12rem;
+  font-weight: 900;
+  line-height: 1.22;
+  text-decoration: none;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.newsbreak-copy p {
+  display: -webkit-box;
+  overflow: hidden;
+  margin: 7px 0;
+  color: #526168;
+  font-size: 0.9rem;
+  line-height: 1.38;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.newsbreak-copy small {
+  color: #647278;
 }
 
 .badge {
@@ -814,6 +870,14 @@ a {
   .article-preview-body {
     grid-template-columns: 112px minmax(0, 1fr);
   }
+
+  .newsbreak-story {
+    grid-template-columns: 112px minmax(0, 1fr);
+  }
+
+  .newsbreak-story img {
+    width: 112px;
+  }
 }
 
 @media (max-width: 620px) {
@@ -836,5 +900,13 @@ a {
 
   .article-preview-body {
     grid-template-columns: 1fr;
+  }
+
+  .newsbreak-story {
+    grid-template-columns: 1fr;
+  }
+
+  .newsbreak-story img {
+    width: 100%;
   }
 }

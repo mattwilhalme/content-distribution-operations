@@ -290,6 +290,16 @@ async function scanFeed(url: string, reachable: boolean, isHttps: boolean, xml: 
   const titlesWithFeedNoise = feed.items.filter((item) => titleIncludesSourceOrDate(item.title, feed.title)).length;
   const feedSizeBytes = Buffer.byteLength(xml, "utf8");
   const smartNewsThumbnailStatus: CheckStatus = missingThumbnails === 0 ? "pass" : missingThumbnails > 3 || missingThumbnails / Math.max(itemCount, 1) > 0.2 ? "fail" : "warn";
+  const newsBreakRequiredItems = feed.items.filter((item) => item.title && item.link && item.publishedAt && item.author && item.description && item.hasContentEncoded).length;
+  const newsBreakCleanLinks = feed.items.filter((item) => item.link && !hasUtmParameters(item.link)).length;
+  const newsBreakImageFallbackItems = feed.items.filter((item) => item.thumbnailUrls.length > 0 || item.hasLeadImageInContent).length;
+  const contentImagesWithoutCaptions = feed.items.filter((item) => hasImageTag(item.body) && !hasFigureCaption(item.body)).length;
+  const iframeItems = feed.items.filter((item) => hasIframe(item.body)).length;
+  const iframesMissingNewsBreakClass = feed.items.filter((item) => hasIframe(item.body) && !hasNewsBreakIframeClass(item.body)).length;
+  const guidUrlItems = feed.items.filter((item) => !item.guid || isHttpUrl(item.guid)).length;
+  const hasNewsBreakNamespace = xml.includes('xmlns:nb="https://www.newsbreak.com/"') || xml.includes("xmlns:nb='https://www.newsbreak.com/'");
+  const hasDcNamespace = xml.includes('xmlns:dc="http://purl.org/dc/elements/1.1/"') || xml.includes("xmlns:dc='http://purl.org/dc/elements/1.1/'");
+  const hasContentNamespace = xml.includes('xmlns:content="http://purl.org/rss/1.0/modules/content/"') || xml.includes("xmlns:content='http://purl.org/rss/1.0/modules/content/'");
   const sampledItems = feed.items.slice(0, 5);
   const analyzedPages = sampledItems.filter((item) => item.pageAnalysis);
   const reachablePages = analyzedPages.filter((item) => item.pageAnalysis?.reachable).length;
@@ -342,8 +352,19 @@ async function scanFeed(url: string, reachable: boolean, isHttps: boolean, xml: 
   addCheck(checks, "smartnews-item-limit", "SmartNews item count ceiling", itemCount <= 100 ? "pass" : "warn", "medium", "smartnews", `${itemCount} item${itemCount === 1 ? "" : "s"} found.`, "Keep SmartFormat feeds to roughly 100 items or fewer.");
   addCheck(checks, "smartnews-ttl", "SmartNews RSS ttl", feed.feedType !== "rss" || feed.ttl ? "pass" : "warn", "low", "smartnews", feed.feedType === "rss" ? feed.ttl ? `RSS ttl found: ${feed.ttl} minute${feed.ttl === "1" ? "" : "s"}.` : "No RSS ttl value found." : "Atom feeds do not use ttl.", "For RSS SmartFormat feeds, set ttl when you want to control fetch interval; 1 minute is the minimum.");
 
+  addCheck(checks, "newsbreak-feed-format", "NewsBreak accepted feed format", feed.feedType !== "unknown" ? "pass" : "fail", "critical", "newsbreak", feed.feedType !== "unknown" ? `Detected ${feed.feedType.toUpperCase()}, which NewsBreak accepts.` : "Could not detect an accepted RSS 2.0 or Atom 1.0 feed.", "Publish a valid RSS 2.0 or Atom 1.0 feed.");
+  addCheck(checks, "newsbreak-rss-namespaces", "NewsBreak RSS namespaces", feed.feedType !== "rss" || (hasNewsBreakNamespace && hasDcNamespace && hasContentNamespace) ? "pass" : "warn", "medium", "newsbreak", feed.feedType !== "rss" ? "Atom feed detected; RSS namespace check skipped." : `${[hasNewsBreakNamespace ? "" : "nb", hasDcNamespace ? "" : "dc", hasContentNamespace ? "" : "content"].filter(Boolean).join(", ") || "Required"} namespace signal${hasNewsBreakNamespace && hasDcNamespace && hasContentNamespace ? "s are present." : " missing."}`, "Declare xmlns:nb, xmlns:dc, and xmlns:content on RSS feeds intended for NewsBreak.");
+  addCheck(checks, "newsbreak-required-fields", "NewsBreak required item fields", newsBreakRequiredItems === itemCount && itemCount > 0 ? "pass" : "fail", "critical", "newsbreak", `${newsBreakRequiredItems} of ${itemCount} items include title, link, publication date, author, description, and full content.`, "Every NewsBreak item should include title, canonical link, pubDate, dc:creator, description, and content:encoded.");
+  addCheck(checks, "newsbreak-description", "NewsBreak item summaries", itemsWithDescription === itemCount && itemCount > 0 ? "pass" : "fail", "high", "newsbreak", `${itemsWithDescription} of ${itemCount} items include description/summary text.`, "Add a useful description summary to every article item.");
+  addCheck(checks, "newsbreak-author", "NewsBreak item author", missingAuthors === 0 && itemCount > 0 ? "pass" : "fail", "critical", "newsbreak", missingAuthors === 0 ? "All items include author metadata." : `${missingAuthors} item${missingAuthors === 1 ? "" : "s"} missing dc:creator/author.`, "Add dc:creator for each RSS item or author for Atom entries.");
+  addCheck(checks, "newsbreak-full-content", "NewsBreak content:encoded coverage", missingFullContent === 0 && itemCount > 0 ? "pass" : "fail", "critical", "newsbreak", missingFullContent === 0 ? "All items include full HTML content." : `${missingFullContent} item${missingFullContent === 1 ? "" : "s"} missing full HTML content.`, "Provide the full article HTML in content:encoded, including media, captions, and hyperlinks.");
   addCheck(checks, "newsbreak-full-body", "NewsBreak full article body", fullTextItems >= Math.ceil(itemCount * 0.75) && itemCount > 0 ? "pass" : "fail", "critical", "newsbreak", `${fullTextItems} of ${itemCount} items look like full article bodies.`, "Provide full text rather than snippet-only feed items.");
+  addCheck(checks, "newsbreak-clean-links", "NewsBreak canonical article links", newsBreakCleanLinks === itemCount && duplicateLinks.length === 0 && itemCount > 0 ? "pass" : "warn", "high", "newsbreak", `${newsBreakCleanLinks} of ${itemCount} item links are free of tracking parameters; ${duplicateLinks.length} duplicate link${duplicateLinks.length === 1 ? "" : "s"} found.`, "Use canonical article URLs and avoid NewsBreak-specific or tracking parameters.");
+  addCheck(checks, "newsbreak-guid-url", "NewsBreak GUID URL format", guidUrlItems === itemCount ? "pass" : "warn", "low", "newsbreak", `${guidUrlItems} of ${itemCount} items have a blank GUID or URL-formatted GUID.`, "If NewsBreak agrees to use GUID as article URL, keep GUID values as URL permalinks and use consistent generation logic across feeds.");
   addCheck(checks, "newsbreak-media", "NewsBreak image/media presence", itemsWithImages >= Math.ceil(itemCount * 0.75) && itemCount > 0 ? "pass" : "fail", "critical", "newsbreak", `${itemsWithImages} of ${itemCount} items include media.`, "Include primary article images in media:content, media:thumbnail, enclosure, or content markup.");
+  addCheck(checks, "newsbreak-thumbnail-fallback", "NewsBreak thumbnail or content image", newsBreakImageFallbackItems === itemCount && itemCount > 0 ? "pass" : "warn", "medium", "newsbreak", `${newsBreakImageFallbackItems} of ${itemCount} items include media:thumbnail or a lead image in content.`, "Use media:thumbnail when available; otherwise ensure the first image in content:encoded is the intended thumbnail.");
+  addCheck(checks, "newsbreak-image-captions", "NewsBreak image captions", contentImagesWithoutCaptions === 0 ? "pass" : "warn", "medium", "newsbreak", contentImagesWithoutCaptions === 0 ? "No content images missing figure/figcaption structure were detected." : `${contentImagesWithoutCaptions} item${contentImagesWithoutCaptions === 1 ? "" : "s"} include content images without figure/figcaption structure.`, "Wrap content images in figure tags and include figcaption text when captions are available.");
+  addCheck(checks, "newsbreak-iframe-classes", "NewsBreak video/audio iframe classes", iframesMissingNewsBreakClass === 0 ? "pass" : "warn", "medium", "newsbreak", iframeItems === 0 ? "No content iframes detected." : `${iframesMissingNewsBreakClass} of ${iframeItems} item${iframeItems === 1 ? "" : "s"} with iframes are missing nb-video or nb-audio class markers.`, "For embedded video/audio iframes inside content:encoded, add class=\"nb-video\" or class=\"nb-audio\".");
 
   addCheck(checks, "google-fresh-dates", "Google News fresh dates", freshItems > 0 ? "pass" : "warn", "medium", "google_news", `${freshItems} item${freshItems === 1 ? "" : "s"} published in the last 7 days.`, "Keep recent articles in the feed and use accurate publication dates.");
   addCheck(checks, "google-canonical-links", "Google News canonical links", missingLinks === 0 && duplicateLinks.length === 0 ? "pass" : "fail", "high", "google_news", "Google News readiness depends on clean, unique canonical article links.", "Use permanent article URLs and avoid duplicate feed entries.");
@@ -765,6 +786,18 @@ function likelyFullText(body: string): boolean {
 
 function hasImageTag(body: string): boolean {
   return /<img\b[^>]*\bsrc=["'][^"']+["']/i.test(body);
+}
+
+function hasFigureCaption(body: string): boolean {
+  return /<figure\b[\s\S]*?<img\b[\s\S]*?<figcaption\b[\s\S]*?<\/figcaption>[\s\S]*?<\/figure>/i.test(body);
+}
+
+function hasIframe(body: string): boolean {
+  return /<iframe\b/i.test(body);
+}
+
+function hasNewsBreakIframeClass(body: string): boolean {
+  return /<iframe\b(?=[^>]*\bclass=["'][^"']*\bnb-(?:video|audio)\b[^"']*["'])[^>]*>/i.test(body);
 }
 
 function hasUtmParameters(value: string): boolean {

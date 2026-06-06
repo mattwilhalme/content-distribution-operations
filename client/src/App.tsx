@@ -11,7 +11,7 @@ const starterFeed = "https://www.npr.org/rss/rss.php?id=1001";
 const publisherStatuses = ["prospect", "reviewing", "ready", "blocked", "approved"];
 type ResultChannel = "overall" | "smartnews" | "newsbreak" | "google_news" | "apple_news";
 type ViewMode = "dashboard" | "scanner";
-type ArticlePreviewMode = "google_news" | "smartnews" | "diagnostic";
+type ArticlePreviewMode = "google_news" | "smartnews" | "newsbreak" | "diagnostic";
 
 const sharedPlatforms: CheckPlatform[] = ["general", "media", "content"];
 
@@ -57,6 +57,8 @@ export default function App() {
       setArticlePreviewMode("google_news");
     } else if (selectedChannel === "smartnews") {
       setArticlePreviewMode("smartnews");
+    } else if (selectedChannel === "newsbreak") {
+      setArticlePreviewMode("newsbreak");
     } else {
       setArticlePreviewMode("diagnostic");
     }
@@ -403,12 +405,14 @@ export default function App() {
               <div className="preview-toggle" aria-label="Article preview mode">
                 <button className={articlePreviewMode === "google_news" ? "active" : ""} type="button" onClick={() => setArticlePreviewMode("google_news")}>Google News Preview</button>
                 <button className={articlePreviewMode === "smartnews" ? "active" : ""} type="button" onClick={() => setArticlePreviewMode("smartnews")}>SmartNews Preview</button>
+                <button className={articlePreviewMode === "newsbreak" ? "active" : ""} type="button" onClick={() => setArticlePreviewMode("newsbreak")}>NewsBreak Preview</button>
                 <button className={articlePreviewMode === "diagnostic" ? "active" : ""} type="button" onClick={() => setArticlePreviewMode("diagnostic")}>Diagnostic Table</button>
               </div>
             </div>
 
             {articlePreviewMode === "google_news" && <GoogleNewsPreview result={result} />}
             {articlePreviewMode === "smartnews" && <SmartNewsPreview result={result} />}
+            {articlePreviewMode === "newsbreak" && <NewsBreakPreview result={result} />}
             {articlePreviewMode === "diagnostic" && <DiagnosticArticleTable items={result.sampleItems} />}
           </section>
         </>
@@ -560,6 +564,37 @@ function SmartNewsStory({ item }: { item: ScanResponse["sampleItems"][number] })
   );
 }
 
+function NewsBreakPreview({ result }: { result: ScanResponse }) {
+  return (
+    <section className="newsbreak-preview-card" aria-label="Mock NewsBreak preview">
+      <div className="mock-label">Mock rendering</div>
+      <h3>{result.summary.feedTitle || "Feed"} NewsBreak Preview</h3>
+      <div className="newsbreak-list">
+        {result.sampleItems.map((item) => <NewsBreakStory item={item} key={`${item.index}-${item.link}`} />)}
+      </div>
+    </section>
+  );
+}
+
+function NewsBreakStory({ item }: { item: ScanResponse["sampleItems"][number] }) {
+  const analysis = item.articleAnalysis;
+  const headline = analysis?.headline || item.title || "Missing headline";
+  const description = analysis?.description || item.issues.slice(0, 2).join(". ") || "No article summary available.";
+  const source = analysis?.siteName || analysis?.publisher || hostLabel(item.link);
+  const imageUrl = item.thumbnailUrl || analysis?.primaryImageUrl || item.imageUrl;
+
+  return (
+    <article className="newsbreak-story">
+      {imageUrl && <img src={imageUrl} alt="" />}
+      <div className="newsbreak-copy">
+        <a href={item.link} target="_blank" rel="noreferrer">{headline}</a>
+        <p>{description}</p>
+        <small>{source} · {formatDate(analysis?.datePublished || item.publishedAt) || "Missing date"}</small>
+      </div>
+    </article>
+  );
+}
+
 function DiagnosticArticleTable({ items }: { items: ScanResponse["sampleItems"] }) {
   return (
     <div className="table-wrap">
@@ -611,6 +646,7 @@ function articlePreviewTitle(mode: ArticlePreviewMode, feedTitle: string) {
   const title = feedTitle || "Feed";
   if (mode === "google_news") return `${title} Google News Preview`;
   if (mode === "smartnews") return `${title} SmartNews Preview`;
+  if (mode === "newsbreak") return `${title} NewsBreak Preview`;
   return "Diagnostic Table";
 }
 
