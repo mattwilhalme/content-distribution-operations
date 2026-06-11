@@ -33,6 +33,17 @@ const channelLabels: Record<ResultChannel, string> = {
   apple_news: "Apple News"
 };
 
+const warningOverlapByBlocker: Record<string, string[]> = {
+  "smartnews-full-content": ["content-encoded", "full-text-estimate", "short-bodies"],
+  "smartnews-full-text-depth": ["full-text-estimate", "short-bodies"],
+  "smartnews-thumbnails": ["media-thumbnail"],
+  "newsbreak-full-content": ["content-encoded", "full-text-estimate", "short-bodies"],
+  "newsbreak-full-body": ["full-text-estimate", "short-bodies"],
+  "newsbreak-media": ["missing-images", "media-content", "enclosure-media"],
+  "newsbreak-required-fields": ["description-summary", "content-encoded"],
+  "google-sample-pages-reachable": ["google-article-schema", "google-headline", "google-article-images", "google-author", "google-canonical-page"]
+};
+
 export default function App() {
   const [url, setUrl] = useState(starterFeed);
   const [result, setResult] = useState<ScanResponse | null>(null);
@@ -264,10 +275,13 @@ export default function App() {
 
   const grouped = useMemo(() => {
     const checks = selectedChecks;
+    const critical = checks.filter((check) => check.status === "fail" && check.severity === "critical");
+    const visibleWarnings = filterOverlappingWarnings(checks.filter((check) => check.status === "warn"), critical);
+
     return {
-      critical: checks.filter((check) => check.status === "fail" && check.severity === "critical"),
+      critical,
       failed: checks.filter((check) => check.status === "fail" && check.severity !== "critical"),
-      warnings: checks.filter((check) => check.status === "warn"),
+      warnings: visibleWarnings,
       passed: checks.filter((check) => check.status === "pass")
     };
   }, [selectedChecks]);
@@ -400,42 +414,6 @@ export default function App() {
         </>
       )}
 
-      <section className="history-section">
-        <div className="section-head">
-          <div>
-            <p className="eyebrow">Scan history</p>
-            <h2>{selectedPublisher ? `${selectedPublisher.domain} runs` : "Recent runs"}</h2>
-          </div>
-          <button className="secondary-button" type="button" onClick={loadHistory} disabled={historyLoading}>
-            {historyLoading ? "Loading" : "Refresh"}
-          </button>
-        </div>
-        {historyError && <div className="error compact">{historyError}</div>}
-        <div className="history-list">
-          {visibleHistory.map((scan) => (
-            <div className={`history-row-shell ${selectedScanId === scan.id ? "selected" : ""}`} key={scan.id}>
-              <button className="history-row" onClick={() => void loadSavedScan(scan.id)} type="button">
-                <span>
-                  <strong>{scan.feedTitle || scan.domain || "Untitled feed"}</strong>
-                  <small>{scan.inputUrl}</small>
-                </span>
-                <span className="history-meta">
-                  <strong>{scan.overallScore}</strong>
-                  <small>{scan.itemCount} items</small>
-                </span>
-                <span className="history-meta">
-                  <strong>{scan.criticalCount}</strong>
-                  <small>critical</small>
-                </span>
-                <span className="history-time">{formatDate(scan.fetchedAt)}</span>
-              </button>
-              <button className="secondary-button" type="button" disabled={loading} onClick={() => void rescan(scan)}>Rescan</button>
-            </div>
-          ))}
-          {!visibleHistory.length && !historyLoading && <p className="clean">No saved scans yet.</p>}
-        </div>
-      </section>
-
       {viewMode === "scanner" && !result && !error && (
         <section className="empty-state">
           <h2>Ready for the next audit</h2>
@@ -507,6 +485,42 @@ export default function App() {
           </section>
         </>
       )}
+
+      <section className="history-section">
+        <div className="section-head">
+          <div>
+            <p className="eyebrow">Scan history</p>
+            <h2>{selectedPublisher ? `${selectedPublisher.domain} runs` : "Recent runs"}</h2>
+          </div>
+          <button className="secondary-button" type="button" onClick={loadHistory} disabled={historyLoading}>
+            {historyLoading ? "Loading" : "Refresh"}
+          </button>
+        </div>
+        {historyError && <div className="error compact">{historyError}</div>}
+        <div className="history-list">
+          {visibleHistory.map((scan) => (
+            <div className={`history-row-shell ${selectedScanId === scan.id ? "selected" : ""}`} key={scan.id}>
+              <button className="history-row" onClick={() => void loadSavedScan(scan.id)} type="button">
+                <span>
+                  <strong>{scan.feedTitle || scan.domain || "Untitled feed"}</strong>
+                  <small>{scan.inputUrl}</small>
+                </span>
+                <span className="history-meta">
+                  <strong>{scan.overallScore}</strong>
+                  <small>{scan.itemCount} items</small>
+                </span>
+                <span className="history-meta">
+                  <strong>{scan.criticalCount}</strong>
+                  <small>critical</small>
+                </span>
+                <span className="history-time">{formatDate(scan.fetchedAt)}</span>
+              </button>
+              <button className="secondary-button" type="button" disabled={loading} onClick={() => void rescan(scan)}>Rescan</button>
+            </div>
+          ))}
+          {!visibleHistory.length && !historyLoading && <p className="clean">No saved scans yet.</p>}
+        </div>
+      </section>
     </main>
   );
 }
@@ -619,27 +633,40 @@ function GoogleStory({ item, lead = false }: { item: ScanResponse["sampleItems"]
 }
 
 function SmartNewsPreview({ result }: { result: ScanResponse }) {
+  const [selectedIndex, setSelectedIndex] = useState(0);
+  const selectedItem = result.sampleItems[selectedIndex] ?? result.sampleItems[0];
+
   return (
-    <section className="smartnews-preview-card" aria-label="Mock SmartNews preview">
+    <section className="distributor-preview smartnews-preview" aria-label="Mock SmartNews preview">
       <div className="mock-label">Mock rendering</div>
       <h3>{result.summary.feedTitle || "Feed"} SmartNews Preview</h3>
-      <div className="smartnews-list">
-        {result.sampleItems.map((item) => <SmartNewsStory item={item} key={`${item.index}-${item.link}`} />)}
+      <div className="distributor-preview-grid">
+        <div className="smartnews-list">
+          {result.sampleItems.map((item, index) => (
+            <SmartNewsStory
+              item={item}
+              selected={selectedItem?.index === item.index}
+              onSelect={() => setSelectedIndex(index)}
+              key={`${item.index}-${item.link}`}
+            />
+          ))}
+        </div>
+        {selectedItem && <SmartNewsArticlePane item={selectedItem} />}
       </div>
     </section>
   );
 }
 
-function SmartNewsStory({ item }: { item: ScanResponse["sampleItems"][number] }) {
+function SmartNewsStory({ item, selected, onSelect }: { item: ScanResponse["sampleItems"][number]; selected: boolean; onSelect: () => void }) {
   const analysis = item.articleAnalysis;
   const headline = analysis?.headline || item.title || "Missing headline";
   const source = analysis?.siteName || analysis?.publisher || hostLabel(item.link);
   const hasSmartNewsThumbnail = item.hasThumbnail && Boolean(item.thumbnailUrl);
 
   return (
-    <article className="smartnews-story">
+    <button className={`smartnews-story ${selected ? "selected" : ""}`} type="button" onClick={onSelect}>
       <div>
-        <a href={item.link} target="_blank" rel="noreferrer">{headline}</a>
+        <strong>{headline}</strong>
         <small>{source} · {formatDate(analysis?.datePublished || item.publishedAt) || "Missing date"}</small>
       </div>
       {hasSmartNewsThumbnail ? (
@@ -650,36 +677,114 @@ function SmartNewsStory({ item }: { item: ScanResponse["sampleItems"][number] })
           <span>missing</span>
         </div>
       )}
+    </button>
+  );
+}
+
+function SmartNewsArticlePane({ item }: { item: ScanResponse["sampleItems"][number] }) {
+  const analysis = item.articleAnalysis;
+  const headline = analysis?.headline || item.title || "Missing headline";
+  const author = item.author || analysis?.author || "Missing author";
+  const imageUrl = analysis?.primaryImageUrl || item.imageUrl || item.thumbnailUrl;
+  const body = articleBodyText(item);
+
+  return (
+    <article className="smartnews-article-pane">
+      <h4>{headline}</h4>
+      <p className="smartnews-byline">{author}</p>
+      {imageUrl && <img src={imageUrl} alt="" />}
+      <p>{body}</p>
+      <div className="preview-evaluation">
+        <Badge ok={item.hasContentEncoded && item.likelyFullText} label={item.likelyFullText ? "Full text" : "Partial text"} />
+        <Badge ok={item.hasThumbnail} label={item.hasThumbnail ? "Thumbnail" : "No thumbnail"} />
+        <Badge ok={Boolean(item.author || analysis?.author)} label={item.author || analysis?.author ? "Author" : "No author"} />
+      </div>
     </article>
   );
 }
 
 function NewsBreakPreview({ result }: { result: ScanResponse }) {
+  const [selectedIndex, setSelectedIndex] = useState(0);
+  const selectedItem = result.sampleItems[selectedIndex] ?? result.sampleItems[0];
+
   return (
-    <section className="newsbreak-preview-card" aria-label="Mock NewsBreak preview">
+    <section className="distributor-preview newsbreak-preview" aria-label="Mock NewsBreak preview">
       <div className="mock-label">Mock rendering</div>
       <h3>{result.summary.feedTitle || "Feed"} NewsBreak Preview</h3>
-      <div className="newsbreak-list">
-        {result.sampleItems.map((item) => <NewsBreakStory item={item} key={`${item.index}-${item.link}`} />)}
+      <div className="distributor-preview-grid">
+        <div className="newsbreak-list">
+          {result.sampleItems.map((item, index) => (
+            <NewsBreakStory
+              item={item}
+              selected={selectedItem?.index === item.index}
+              onSelect={() => setSelectedIndex(index)}
+              key={`${item.index}-${item.link}`}
+            />
+          ))}
+        </div>
+        {selectedItem && <NewsBreakArticlePane item={selectedItem} />}
       </div>
     </section>
   );
 }
 
-function NewsBreakStory({ item }: { item: ScanResponse["sampleItems"][number] }) {
+function NewsBreakStory({ item, selected, onSelect }: { item: ScanResponse["sampleItems"][number]; selected: boolean; onSelect: () => void }) {
   const analysis = item.articleAnalysis;
   const headline = analysis?.headline || item.title || "Missing headline";
-  const description = analysis?.description || item.issues.slice(0, 2).join(". ") || "No article summary available.";
   const source = analysis?.siteName || analysis?.publisher || hostLabel(item.link);
   const imageUrl = item.thumbnailUrl || analysis?.primaryImageUrl || item.imageUrl;
 
   return (
-    <article className="newsbreak-story">
+    <button className={`newsbreak-story ${selected ? "selected" : ""}`} type="button" onClick={onSelect}>
+      <div className="newsbreak-source-row">
+        <span className="newsbreak-avatar">{source.slice(0, 1).toUpperCase()}</span>
+        <span>
+          <strong>{source}</strong>
+          <small>partner publisher</small>
+        </span>
+      </div>
       {imageUrl && <img src={imageUrl} alt="" />}
       <div className="newsbreak-copy">
-        <a href={item.link} target="_blank" rel="noreferrer">{headline}</a>
-        <p>{description}</p>
-        <small>{source} · {formatDate(analysis?.datePublished || item.publishedAt) || "Missing date"}</small>
+        <small>{item.categories?.[0] || "News"} · {relativeAge(analysis?.datePublished || item.publishedAt)}</small>
+        <strong>{headline}</strong>
+      </div>
+      <div className="newsbreak-actions">
+        <span>Like</span>
+        <span>Comment</span>
+        <span>Share</span>
+      </div>
+    </button>
+  );
+}
+
+function NewsBreakArticlePane({ item }: { item: ScanResponse["sampleItems"][number] }) {
+  const analysis = item.articleAnalysis;
+  const headline = analysis?.headline || item.title || "Missing headline";
+  const source = analysis?.siteName || analysis?.publisher || hostLabel(item.link);
+  const author = item.author || analysis?.author || source;
+  const imageUrl = analysis?.primaryImageUrl || item.imageUrl || item.thumbnailUrl;
+  const body = articleBodyText(item);
+
+  return (
+    <article className="newsbreak-article-pane">
+      <div className="newsbreak-phone-bar">
+        <span>12:51</span>
+        <span>AA</span>
+      </div>
+      <p className="newsbreak-section">{item.categories?.[0] || "News"}</p>
+      <h4>{headline}</h4>
+      <p className="newsbreak-byline">By {author}, {relativeAge(analysis?.datePublished || item.publishedAt)}</p>
+      <div className="newsbreak-publisher-row">
+        <span className="newsbreak-avatar">{source.slice(0, 1).toUpperCase()}</span>
+        <strong>{source}</strong>
+        <span>Follow</span>
+      </div>
+      {imageUrl && <img src={imageUrl} alt="" />}
+      <p>{body}</p>
+      <div className="preview-evaluation">
+        <Badge ok={Boolean(imageUrl)} label={imageUrl ? "Image" : "No image"} />
+        <Badge ok={Boolean(item.description || analysis?.description)} label={item.description || analysis?.description ? "Summary" : "No summary"} />
+        <Badge ok={item.hasContentEncoded} label={item.hasContentEncoded ? "Feed body" : "No feed body"} />
       </div>
     </article>
   );
@@ -732,6 +837,11 @@ function articlePageSummary(item: ScanResponse["sampleItems"][number]) {
   ].join(" / ");
 }
 
+function filterOverlappingWarnings(warnings: FeedCheck[], blockers: FeedCheck[]) {
+  const hiddenWarningIds = new Set(blockers.flatMap((blocker) => warningOverlapByBlocker[blocker.id] ?? []));
+  return warnings.filter((warning) => !hiddenWarningIds.has(warning.id));
+}
+
 function articlePreviewTitle(mode: ArticlePreviewMode, feedTitle: string) {
   const title = feedTitle || "Feed";
   if (mode === "google_news") return `${title} Google News Preview`;
@@ -750,6 +860,23 @@ function hostLabel(value: string) {
   } catch {
     return "Unknown publisher";
   }
+}
+
+function articleBodyText(item: ScanResponse["sampleItems"][number]) {
+  return item.bodyText || item.description || item.articleAnalysis?.description || item.issues.slice(0, 2).join(". ") || "No article body was included in the sampled feed item.";
+}
+
+function relativeAge(value: string) {
+  const time = Date.parse(value);
+  if (Number.isNaN(time)) return "Missing date";
+
+  const minutes = Math.max(1, Math.round((Date.now() - time) / 60000));
+  if (minutes < 60) return `${minutes}m ago`;
+
+  const hours = Math.round(minutes / 60);
+  if (hours < 48) return `${hours}h ago`;
+
+  return `${Math.round(hours / 24)}d ago`;
 }
 
 function parseBulkEntries(value: string): string[] {

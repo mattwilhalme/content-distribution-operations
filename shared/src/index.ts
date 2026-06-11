@@ -33,6 +33,10 @@ export interface SampleItem {
   link: string;
   guid: string;
   publishedAt: string;
+  author: string;
+  categories: string[];
+  description: string;
+  bodyText: string;
   hasImage: boolean;
   imageUrl: string;
   hasThumbnail: boolean;
