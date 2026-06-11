@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import type {
+  BulkIntakeResult,
   CheckPlatform,
   FeedCheck,
   PublisherSummary,
@@ -8,6 +9,7 @@ import type {
 } from "@content-distribution-operations/shared";
 
 const starterFeed = "https://www.npr.org/rss/rss.php?id=1001";
+const starterBulkInput = "https://www.npr.org/rss/rss.php?id=1001\napnews.com";
 const publisherStatuses = ["prospect", "reviewing", "ready", "blocked", "approved"];
 type ResultChannel = "overall" | "smartnews" | "newsbreak" | "google_news" | "apple_news";
 type ViewMode = "dashboard" | "scanner";
@@ -41,6 +43,9 @@ export default function App() {
   const [historyError, setHistoryError] = useState("");
   const [historyLoading, setHistoryLoading] = useState(false);
   const [publisherLoading, setPublisherLoading] = useState(false);
+  const [bulkInput, setBulkInput] = useState(starterBulkInput);
+  const [bulkLoading, setBulkLoading] = useState(false);
+  const [bulkResults, setBulkResults] = useState<BulkIntakeResult[]>([]);
   const [selectedScanId, setSelectedScanId] = useState("");
   const [selectedPublisherId, setSelectedPublisherId] = useState("");
   const [selectedChannel, setSelectedChannel] = useState<ResultChannel>("smartnews");
@@ -87,6 +92,12 @@ export default function App() {
       averageScore
     };
   }, [history.length, publishers]);
+
+  const bulkEntries = useMemo(() => parseBulkEntries(bulkInput), [bulkInput]);
+  const bulkSummary = useMemo(() => ({
+    scanned: bulkResults.filter((bulkResult) => bulkResult.status === "scanned").length,
+    failed: bulkResults.filter((bulkResult) => bulkResult.status === "failed").length
+  }), [bulkResults]);
 
   async function refreshOperations() {
     await Promise.all([loadPublishers(), loadHistory()]);
@@ -210,6 +221,40 @@ export default function App() {
     }
   }
 
+  async function runBulkIntake() {
+    if (bulkEntries.length === 0) {
+      setError("Add at least one feed URL or publisher domain.");
+      return;
+    }
+
+    setBulkLoading(true);
+    setError("");
+    setBulkResults([]);
+
+    try {
+      const response = await fetch("/api/bulk-intake", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ entries: bulkEntries })
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error ?? "Bulk intake failed.");
+
+      const results = data.results ?? [];
+      setBulkResults(results);
+      const latestScan = [...results].reverse().find((bulkResult: BulkIntakeResult) => bulkResult.scanRunId);
+      if (latestScan) {
+        setSelectedScanId(latestScan.scanRunId);
+        setSelectedPublisherId(latestScan.publisherId);
+      }
+      await refreshOperations();
+    } catch (bulkError) {
+      setError(bulkError instanceof Error ? bulkError.message : "Bulk intake failed.");
+    } finally {
+      setBulkLoading(false);
+    }
+  }
+
   const selectedChecks = useMemo(() => {
     const checks = result?.checks ?? [];
     if (selectedChannel === "overall") return checks;
@@ -260,6 +305,51 @@ export default function App() {
             <MetricCard label="Saved scans" value={metrics.scans} />
             <MetricCard label="Avg score" value={metrics.averageScore} />
             <MetricCard label="Needs attention" value={metrics.blocked} />
+          </section>
+
+          <section className="bulk-section">
+            <div className="section-head">
+              <div>
+                <p className="eyebrow">Bulk intake</p>
+                <h2>Scan publisher pipeline</h2>
+              </div>
+              <button className="secondary-button" type="button" onClick={() => void runBulkIntake()} disabled={bulkLoading || bulkEntries.length === 0}>
+                {bulkLoading ? "Scanning" : `Run ${bulkEntries.length || ""}`.trim()}
+              </button>
+            </div>
+            <div className="bulk-grid">
+              <label className="bulk-input-label" htmlFor="bulk-input">
+                <span>Feed URLs or domains</span>
+                <textarea
+                  id="bulk-input"
+                  value={bulkInput}
+                  onChange={(event) => setBulkInput(event.target.value)}
+                  placeholder="https://example.com/feed.xml&#10;example.com"
+                />
+              </label>
+              <div className="bulk-results">
+                <div className="bulk-counts">
+                  <span><strong>{bulkEntries.length}</strong> queued</span>
+                  <span><strong>{bulkSummary.scanned}</strong> scanned</span>
+                  <span><strong>{bulkSummary.failed}</strong> failed</span>
+                </div>
+                {bulkResults.length ? (
+                  <div className="bulk-result-list">
+                    {bulkResults.map((bulkResult) => (
+                      <article className={`bulk-result ${bulkResult.status}`} key={`${bulkResult.input}-${bulkResult.feedUrl || bulkResult.error}`}>
+                        <div>
+                          <strong>{bulkResult.feedTitle || bulkResult.input}</strong>
+                          <small>{bulkResult.feedUrl || bulkResult.error}</small>
+                        </div>
+                        <span>{bulkResult.status === "scanned" ? bulkResult.overallScore : "Failed"}</span>
+                      </article>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="clean">Paste one item per line, or comma-separated values. Domains will try homepage feed discovery before scanning.</p>
+                )}
+              </div>
+            </div>
           </section>
 
           <section className="publisher-section">
@@ -660,6 +750,15 @@ function hostLabel(value: string) {
   } catch {
     return "Unknown publisher";
   }
+}
+
+function parseBulkEntries(value: string): string[] {
+  return Array.from(new Set(
+    value
+      .split(/[\n,]+/)
+      .map((entry) => entry.trim())
+      .filter(Boolean)
+  )).slice(0, 25);
 }
 
 function checkMessage(check: FeedCheck) {

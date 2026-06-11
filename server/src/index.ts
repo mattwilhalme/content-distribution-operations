@@ -12,6 +12,7 @@ import { getScanRun, listScanRuns, saveScanRun } from "./db/scanRuns.js";
 
 import type {
   ArticleAnalysis,
+  BulkIntakeResult,
   CheckPlatform,
   CheckSeverity,
   CheckStatus,
@@ -162,6 +163,57 @@ app.post("/api/scan", async (req, res) => {
     const message = error instanceof Error ? error.message : "Unable to fetch feed.";
     res.status(502).json({ error: message });
   }
+});
+
+app.post("/api/bulk-intake", async (req, res) => {
+  const entries = normalizeBulkEntries(req.body?.entries);
+
+  if (entries.length === 0) {
+    res.status(400).json({ error: "Add at least one feed URL or publisher domain." });
+    return;
+  }
+
+  const results: BulkIntakeResult[] = [];
+
+  for (const entry of entries) {
+    try {
+      const feedUrl = await resolveFeedUrl(entry);
+      const { scan, statusCode } = await runAndPersistScan(feedUrl);
+
+      results.push({
+        input: entry,
+        status: statusCode === 200 ? "scanned" : "failed",
+        feedUrl,
+        scanRunId: scan.scanRunId ?? "",
+        publisherId: scan.publisherId ?? "",
+        feedTitle: scan.summary.feedTitle,
+        overallScore: scan.overallScore,
+        criticalCount: scan.summary.critical,
+        error: statusCode === 200 ? "" : "Feed URL returned a non-success response."
+      });
+    } catch (error) {
+      results.push({
+        input: entry,
+        status: "failed",
+        feedUrl: "",
+        scanRunId: "",
+        publisherId: "",
+        feedTitle: "",
+        overallScore: 0,
+        criticalCount: 0,
+        error: error instanceof Error ? error.message : "Bulk intake failed."
+      });
+    }
+  }
+
+  res.json({
+    results,
+    summary: {
+      total: results.length,
+      scanned: results.filter((result) => result.status === "scanned").length,
+      failed: results.filter((result) => result.status === "failed").length
+    }
+  });
 });
 
 app.post("/api/scans/:id/rescan", async (req, res) => {
@@ -807,6 +859,112 @@ function hasUtmParameters(value: string): boolean {
   } catch {
     return false;
   }
+}
+
+function normalizeBulkEntries(value: unknown): string[] {
+  const rawEntries = Array.isArray(value) ? value : [];
+  return uniqueStrings(
+    rawEntries
+      .map((entry) => String(entry ?? "").trim())
+      .filter(Boolean)
+  ).slice(0, 25);
+}
+
+async function resolveFeedUrl(input: string): Promise<string> {
+  const url = parseHttpUrl(input) ?? parseHttpUrl(`https://${input}`);
+
+  if (!url) {
+    throw new Error("Enter a valid feed URL or domain.");
+  }
+
+  const isLikelyHomepage = url.pathname === "/" && !url.search;
+  if (!isLikelyHomepage) return url.toString();
+
+  return discoverFeedUrl(url);
+}
+
+async function discoverFeedUrl(homepageUrl: URL): Promise<string> {
+  let baseUrl = homepageUrl.toString();
+
+  try {
+    const homepage = await fetchText(homepageUrl.toString(), 10000);
+    baseUrl = homepage.responseUrl;
+    const alternateFeed = firstAlternateFeedUrl(homepage.body, homepage.responseUrl);
+
+    if (alternateFeed && await looksLikeFeedUrl(alternateFeed)) {
+      return alternateFeed;
+    }
+  } catch {
+    // Fall back to common feed paths when the homepage itself is blocked or unavailable.
+  }
+
+  const candidates = [
+    "/feed",
+    "/rss",
+    "/rss.xml",
+    "/feed.xml",
+    "/atom.xml"
+  ].map((path) => new URL(path, baseUrl).toString());
+
+  for (const candidate of candidates) {
+    if (await looksLikeFeedUrl(candidate)) return candidate;
+  }
+
+  throw new Error("No RSS or Atom feed discovered for this domain.");
+}
+
+async function looksLikeFeedUrl(url: string): Promise<boolean> {
+  try {
+    const { body } = await fetchText(url, 8000);
+    return normalizeFeed(parser.parse(body)).feedType !== "unknown";
+  } catch {
+    return false;
+  }
+}
+
+async function fetchText(url: string, timeoutMs: number): Promise<{ body: string; responseUrl: string }> {
+  const response = await fetch(url, {
+    headers: {
+      "User-Agent": "ContentDistributionOperations/0.1 feed discovery"
+    },
+    signal: AbortSignal.timeout(timeoutMs)
+  });
+
+  if (!response.ok) {
+    throw new Error(`Discovery returned HTTP ${response.status}.`);
+  }
+
+  return {
+    body: await response.text(),
+    responseUrl: response.url
+  };
+}
+
+function firstAlternateFeedUrl(html: string, baseUrl: string): string {
+  const linkMatches = html.matchAll(/<link\b[^>]*>/gi);
+
+  for (const match of linkMatches) {
+    const tag = match[0];
+    const rel = attributeValue(tag, "rel").toLowerCase();
+    const type = attributeValue(tag, "type").toLowerCase();
+    const href = attributeValue(tag, "href");
+
+    if (!href || !rel.includes("alternate")) continue;
+    if (!["application/rss+xml", "application/atom+xml", "application/feed+json", "text/xml", "application/xml"].includes(type)) continue;
+
+    try {
+      return new URL(decodeHtmlEntities(href), baseUrl).toString();
+    } catch {
+      return "";
+    }
+  }
+
+  return "";
+}
+
+function attributeValue(tag: string, name: string): string {
+  const pattern = new RegExp(`\\b${escapeRegExp(name)}=["']([^"']+)["']`, "i");
+  return decodeHtmlEntities(tag.match(pattern)?.[1]?.trim() ?? "");
 }
 
 function isHttpUrl(value: string): boolean {

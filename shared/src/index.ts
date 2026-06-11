@@ -112,6 +112,18 @@ export interface ScanRunSummary {
   fetchedAt: string;
 }
 
+export interface BulkIntakeResult {
+  input: string;
+  status: "scanned" | "failed";
+  feedUrl: string;
+  scanRunId: string;
+  publisherId: string;
+  feedTitle: string;
+  overallScore: number;
+  criticalCount: number;
+  error: string;
+}
+
 export interface PublisherSummary {
   id: string;
   name: string;

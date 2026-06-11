@@ -88,20 +88,29 @@ label {
 
 input,
 button,
-select {
+select,
+textarea {
   min-height: 46px;
   border-radius: 8px;
   font: inherit;
 }
 
 input,
-select {
+select,
+textarea {
   width: 100%;
   min-width: 0;
   border: 1px solid #c9d2cf;
   padding: 0 13px;
   color: #172026;
   background: #ffffff;
+}
+
+textarea {
+  min-height: 136px;
+  padding: 12px 13px;
+  line-height: 1.45;
+  resize: vertical;
 }
 
 button {
@@ -218,6 +227,7 @@ button:disabled {
 }
 
 .history-section,
+.bulk-section,
 .publisher-section {
   margin-top: 22px;
   padding: 18px;
@@ -247,6 +257,82 @@ button:disabled {
 .publisher-list {
   display: grid;
   gap: 10px;
+}
+
+.bulk-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 0.8fr);
+  gap: 14px;
+  align-items: start;
+}
+
+.bulk-input-label span {
+  display: block;
+  margin-bottom: 8px;
+}
+
+.bulk-results {
+  display: grid;
+  gap: 12px;
+}
+
+.bulk-counts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.bulk-counts span {
+  padding: 12px;
+  border: 1px solid #edf0ec;
+  border-radius: 8px;
+  background: #fbfcfa;
+  color: #647278;
+  font-size: 0.84rem;
+}
+
+.bulk-counts strong {
+  display: block;
+  color: #172026;
+  font-size: 1.35rem;
+}
+
+.bulk-result-list {
+  display: grid;
+  gap: 8px;
+}
+
+.bulk-result {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 12px;
+  border-left: 4px solid #24706d;
+  border-radius: 8px;
+  background: #f4fbf8;
+}
+
+.bulk-result.failed {
+  border-left-color: #b83246;
+  background: #fff7f8;
+}
+
+.bulk-result strong,
+.bulk-result small {
+  display: block;
+}
+
+.bulk-result small {
+  overflow: hidden;
+  color: #647278;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bulk-result span {
+  color: #526168;
+  font-weight: 900;
 }
 
 .publisher-row,
@@ -842,10 +928,11 @@ a {
   .hero,
   .overview,
   .metric-grid,
-  .article-preview-grid,
-  .channel-summary,
-  .checks-grid,
-  .publisher-main,
+	  .article-preview-grid,
+	  .channel-summary,
+	  .checks-grid,
+	  .bulk-grid,
+	  .publisher-main,
   .publisher-controls,
   .history-row-shell,
   .history-row {
